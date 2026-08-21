@@ -29,6 +29,7 @@ jobs:
           cache-dependency-path: sous-lite/package-lock.json
       - run: npm ci
       - run: npm run check
+      - uses: docker/setup-buildx-action@v3
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
