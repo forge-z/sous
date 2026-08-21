@@ -8,7 +8,7 @@
     "dev": "vite --port 5173",
     "start": "node server/index.js",
     "build": "vite build",
-    "test": "node --test",
+    "test": "node --test test/parser.check.js",
     "check": "npm test && npm run build"
   },
   "dependencies": {
