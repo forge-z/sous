@@ -3,4 +3,6 @@ dist
 data
 *.db
 .env
-.DS_Store
+.git
+.github
+test
