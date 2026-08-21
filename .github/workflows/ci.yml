@@ -49,3 +49,5 @@ jobs:
           tags: sous-ci:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Report Docker image size
+        run: docker image inspect sous-ci:latest --format "Image size: {{.Size}} bytes"
