@@ -19,7 +19,7 @@ export type InventoryInput = {
 };
 
 export const normalizeName = (name: string) => name.trim().toLocaleLowerCase("pt-BR")
-  .normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/\\s+/g, " ");
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
 
 const mapItem = (row: Record<string, unknown>): InventoryItem => ({
   ...(row as Omit<InventoryItem, "quantity">),
