@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sous
+      POSTGRES_PASSWORD: sous
+      POSTGRES_DB: sous
+    volumes:
+      - sous_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sous -d sous"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  sous:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://sous:sous@db:5432/sous
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm run db:migrate && node server.js"
+
+volumes:
+  sous_db:
