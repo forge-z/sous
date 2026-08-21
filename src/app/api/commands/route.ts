@@ -1,4 +1,4 @@
-import { getInventory, listInventory, addInventory, consumeInventory, markInventoryEmpty, updateInventory } from "@/lib/domain/inventory";
+import { listInventory, addInventory, consumeInventory, markInventoryEmpty, updateInventory } from "@/lib/domain/inventory";
 import { parseInventoryCommand } from "@/lib/natural-language/parser";
 import { jsonError } from "@/lib/http";
 import { NextResponse } from "next/server";
@@ -13,7 +13,8 @@ export async function POST(request: Request) {
     const inventory = await listInventory();
     const results = [];
     for (const action of actions) {
-      const item = inventory.find((candidate) => candidate.normalized_name === action.item.toLocaleLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, ""));
+      const normalizedActionItem = action.item.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const item = inventory.find((candidate) => candidate.normalized_name === normalizedActionItem);
       if (action.action === "add") results.push(await addInventory({ name: action.item, quantity: action.quantity, unit: action.unit }));
       else if (!item) results.push({ action, error: "Item not found in inventory" });
       else if (action.action === "consume") results.push(await consumeInventory(item.id, action.quantity ?? undefined));
