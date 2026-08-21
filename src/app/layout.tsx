@@ -3,9 +3,9 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Sous",
-  description: "Your kitchen has an inventory. Sous makes it useful."
+  description: "Seu inventário de cozinha, simples e persistente."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="pt-BR"><body>{children}</body></html>;
 }
