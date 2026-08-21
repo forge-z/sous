@@ -13,7 +13,7 @@ class OpenAICompatibleProvider implements AIProvider {
     const key = process.env.AI_API_KEY;
     const model = process.env.AI_MODEL;
     if (!baseUrl || !key || !model) throw new Error("AI provider is not configured");
-    const response = await fetch(baseUrl.replace(/\\/$/, "") + "/chat/completions", {
+    const response = await fetch(baseUrl.replace(/\/$/, "") + "/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer " + key },
       body: JSON.stringify({ model, messages, temperature: 0.4 })
