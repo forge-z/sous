@@ -24,13 +24,19 @@ Included:
 Requirements: Docker and Docker Compose.
 
     cp .env.example .env
-    docker compose up -d
+    docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 
 Open http://localhost:3000.
 
+The local override publishes port 3000 only for development. The base Compose file intentionally has no host port mapping, which avoids collisions when deployed through Coolify.
+
 Load fictional demo data with:
 
-    docker compose exec sous npm run db:seed
+    docker compose -f docker-compose.yml -f docker-compose.local.yml exec sous npm run db:seed
+
+## Coolify
+
+Use `docker-compose.yml` as the Compose source in Coolify. Configure the `sous` service with container port `3000` and assign the domain in Coolify. Do not add a host port mapping such as `3000:3000`; Coolify routes the domain to the container internally, so other services may continue using host port 3000. The PostgreSQL service remains private and has no public port.
 
 ## Natural language
 
