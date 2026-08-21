@@ -1,0 +1,40 @@
+name: Sous Lite
+
+on:
+  push:
+    branches: ["rewrite/**"]
+    paths:
+      - "sous-lite/**"
+      - ".github/workflows/sous-lite.yml"
+  pull_request:
+    paths:
+      - "sous-lite/**"
+      - ".github/workflows/sous-lite.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sous-lite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sous-lite/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: sous-lite
+          file: sous-lite/Dockerfile
+          push: false
+          tags: sous-lite:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
