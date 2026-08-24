@@ -14,7 +14,9 @@ export function openDatabase(dataDir) {
       quantity REAL NOT NULL DEFAULT 0,
       unit TEXT NOT NULL DEFAULT 'un',
       min_quantity REAL NOT NULL DEFAULT 0,
+      storage_location TEXT NOT NULL DEFAULT 'despensa',
       expires_on TEXT,
+      expiry_estimated INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -28,5 +30,10 @@ export function openDatabase(dataDir) {
       updated_at TEXT NOT NULL
     );
   `);
+
+  const columns = new Set(db.prepare('PRAGMA table_info(inventory)').all().map((column) => column.name));
+  if (!columns.has('storage_location')) db.exec("ALTER TABLE inventory ADD COLUMN storage_location TEXT NOT NULL DEFAULT 'despensa'");
+  if (!columns.has('expiry_estimated')) db.exec('ALTER TABLE inventory ADD COLUMN expiry_estimated INTEGER NOT NULL DEFAULT 0');
+
   return db;
 }
