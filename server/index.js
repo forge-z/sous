@@ -10,7 +10,7 @@ const app = Fastify({ logger: process.env.NODE_ENV !== 'test' });
 const dataDir = process.env.DATA_DIR || path.join(root, '..', 'data');
 const db = openDatabase(dataDir);
 const now = () => new Date().toISOString();
-const cleanName = (value) => String(value || '').trim().replace(/\\s+/g, ' ').slice(0, 120);
+const cleanName = (value) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 120);
 const number = (value, fallback = 0) => {
   const parsed = Number(String(value ?? '').replace(',', '.'));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
@@ -18,16 +18,22 @@ const number = (value, fallback = 0) => {
 const idOf = (value) => Number.isInteger(Number(value)) ? Number(value) : 0;
 const STORAGE_LOCATIONS = new Set(['despensa', 'geladeira', 'freezer', 'fruteira', 'bancada', 'outro']);
 
+function normalizedText(value) {
+  return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function normalizeStorage(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return STORAGE_LOCATIONS.has(normalized) ? normalized : 'despensa';
 }
 
 function inferStorageLocation(name) {
-  const value = String(name || '').toLowerCase();
+  const value = normalizedText(name);
   if (/(?:congelad|sorvete|gelo|polpa)/.test(value)) return 'freezer';
-  if (/\b(?:banana|maçã|maca|laranja|limão|limao|abacate|manga|mamão|mamao|pera)\b/.test(value)) return 'fruteira';
-  if (/\b(?:leite|queijo|iogurte|manteiga|requeijão|requeijao|creme de leite|ovo|carne|frango|peixe|presunto|linguiça|linguica|tofu)\b/.test(value)) return 'geladeira';
+  if (/\b(?:contra[- ]?file|carne|frango|peixe|presunto|linguica|picanha|bife|alcatra|patinho|acem)\b/.test(value)) return 'geladeira';
+  if (/\b(?:leite)\b/.test(value)) return /\b(?:abert[oa]?|abri[ur]?)\b/.test(value) ? 'geladeira' : 'despensa';
+  if (/\b(?:queijo|iogurte|manteiga|requeijao|creme de leite|ovo|tofu)\b/.test(value)) return 'geladeira';
+  if (/\b(?:banana|maca|laranja|limao|abacate|manga|mamao|pera)\b/.test(value)) return 'fruteira';
   return 'despensa';
 }
 
@@ -38,11 +44,11 @@ function addDays(days) {
 }
 
 function estimateExpiry(name, storage) {
-  const value = String(name || '').toLowerCase();
+  const value = normalizedText(name);
   if (storage === 'freezer') return addDays(90);
   if (storage !== 'geladeira') return null;
-  if (/\b(?:carne|frango|peixe|presunto|linguiça|linguica)\b/.test(value)) return addDays(3);
-  if (/\b(?:leite|queijo|iogurte|manteiga|requeijão|requeijao|creme|ovo)\b/.test(value)) return addDays(7);
+  if (/\b(?:contra[- ]?file|carne|frango|peixe|presunto|linguica|picanha|bife|alcatra|patinho|acem)\b/.test(value)) return addDays(3);
+  if (/\b(?:leite|queijo|iogurte|manteiga|requeijao|creme|ovo)\b/.test(value)) return addDays(7);
   return addDays(5);
 }
 
@@ -50,7 +56,7 @@ function inventoryMeta(body, existing = null) {
   const name = cleanName(body?.name ?? existing?.name);
   const storage = body?.storage_location === undefined
     ? (existing?.storage_location || inferStorageLocation(name))
-    : normalizeStorage(body.storage_location);
+    : body.storage_location ? normalizeStorage(body.storage_location) : inferStorageLocation(name);
   const explicitExpiry = body?.expires_on || (existing?.expiry_estimated ? null : existing?.expires_on) || null;
   const shouldEstimate = body?.auto_expiry !== false;
   const expiresOn = explicitExpiry || (shouldEstimate ? estimateExpiry(name, storage) : null);
