@@ -12,7 +12,9 @@ const state = { tab: 'inventory', inventory: [], shopping: [], loading: true, er
 const app = document.querySelector('#app');
 
 async function api(path, options = {}) {
-  const response = await fetch(path, { headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
+  const headers = { ...(options.headers || {}) };
+  if (options.body !== undefined) headers['content-type'] = 'application/json';
+  const response = await fetch(path, { ...options, headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Não foi possível concluir a operação (${response.status}).`);
   return data;
