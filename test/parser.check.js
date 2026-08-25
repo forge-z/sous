@@ -39,6 +39,13 @@ test('normaliza unidades com maiúsculas e por extenso', () => {
   assert.deepEqual(parseCommand('comprei 2 unidades de sabão'), { type: 'inventory.add', name: 'sabão', quantity: 2, unit: 'un' });
 });
 
+test('converte dúzias em unidades de produto', () => {
+  assert.deepEqual(parseCommand('comprei dúzia de ovos'), { type: 'inventory.add', name: 'ovos', quantity: 12, unit: 'un' });
+  assert.deepEqual(parseCommand('comprei meia dúzia de ovos'), { type: 'inventory.add', name: 'ovos', quantity: 6, unit: 'un' });
+  assert.deepEqual(parseCommand('comprei duas dúzias de ovos'), { type: 'inventory.add', name: 'ovos', quantity: 24, unit: 'un' });
+  assert.deepEqual(parseCommand('comprar 1 duzia de ovos'), { type: 'shopping.add', name: 'ovos', quantity: 12, unit: 'un' });
+});
+
 test('aceita variantes naturais em PT-BR para o estoque', () => {
   assert.deepEqual(parseCommand('tenho 3 pães'), { type: 'inventory.add', name: 'pães', quantity: 3, unit: 'un' });
   assert.deepEqual(parseCommand('ganhei 1 bolo'), { type: 'inventory.add', name: 'bolo', quantity: 1, unit: 'un' });

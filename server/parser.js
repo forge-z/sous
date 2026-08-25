@@ -9,6 +9,14 @@ const UNIT_ALIASES = new Map([
   ['un', 'un'], ['unidade', 'un'], ['unidades', 'un'], ['unid', 'un'], ['unids', 'un'],
 ]);
 
+const DOZEN_MULTIPLIERS = new Map([
+  ['meia', 0.5],
+  ['um', 1], ['uma', 1],
+  ['dois', 2], ['duas', 2],
+  ['tres', 3], ['três', 3],
+  ['quatro', 4], ['cinco', 5], ['seis', 6], ['sete', 7], ['oito', 8], ['nove', 9], ['dez', 10],
+]);
+
 export function canonicalUnit(value) {
   return UNIT_ALIASES.get(String(value || '').trim().toLowerCase()) ?? null;
 }
@@ -38,7 +46,24 @@ function splitItems(body) {
     .filter(Boolean);
 }
 
+function parseDozen(chunk) {
+  const numeric = chunk.match(new RegExp('^' + NUMBER + '\\s*d(?:ú|u)zia(?:s)?\\s*(?:de\\s+)?(.+)$', 'i'));
+  if (numeric) {
+    return { name: numeric[2].trim(), quantity: Number(numeric[1].replace(',', '.')) * 12, unit: 'un' };
+  }
+
+  const written = chunk.match(/^(meia|um|uma|dois|duas|tres|três|quatro|cinco|seis|sete|oito|nove|dez)?\s*d(?:ú|u)zia(?:s)?\s*(?:de\s+)?(.+)$/i);
+  if (!written) return null;
+
+  const multiplier = written[1]
+    ? DOZEN_MULTIPLIERS.get(written[1].toLocaleLowerCase('pt-BR')) ?? 1
+    : 1;
+  return { name: written[2].trim(), quantity: multiplier * 12, unit: 'un' };
+}
+
 function parseItem(chunk) {
+  const dozen = parseDozen(chunk);
+  if (dozen) return dozen;
   const match = chunk.match(new RegExp(`^${NUMBER}\\s*(kg|quilo(?:s)?|g|grama(?:s)?|l|litro(?:s)?|ml|mililitro(?:s)?|un(?:idades?)?|unid(?:ade)?s?)?(?=\\s|$)\\s*(?:de\\s+)?(.+)$`, 'i'));
   if (!match) return { name: chunk, quantity: 1, unit: 'un' };
   return { name: match[3].trim(), quantity: Number(match[1].replace(',', '.')), unit: canonicalUnit(match[2]) ?? 'un' };

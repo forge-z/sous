@@ -261,10 +261,10 @@ h2 {
 .tabs {
   display: flex;
   align-items: center;
-  gap: 12px;
-  border-bottom: 2px solid var(--border);
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
   margin-bottom: 22px;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -277,8 +277,9 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: var(--bg-card);
-  border: 2px solid var(--border-strong);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 3px;
   border-radius: var(--radius-md);
   color: var(--text-main);
   font-size: 0.95rem;
@@ -296,7 +297,7 @@ h2 {
 .tabs button.active {
   background: var(--primary);
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--bg-app), 0 0 0 5px var(--primary);
+  box-shadow: 0 2px 0 var(--primary);
   color: var(--primary-contrast);
   font-weight: 700;
 }
@@ -441,7 +442,7 @@ input:focus, select:focus {
 }
 
 /* Primary and Secondary Buttons */
-button.primary, button:not(.icon-button):not(.clear-input):not(.secondary):not(.chip-btn):not(.filter-chip):not(.link-button):not(.close-alert):not(.tab-button) {
+button.primary, button:not(.icon-button):not(.quantity-button):not(.clear-input):not(.secondary):not(.chip-btn):not(.filter-chip):not(.link-button):not(.close-alert):not(.tab-button) {
   background: var(--primary);
   border-radius: var(--radius-sm);
   color: var(--primary-contrast);
@@ -456,7 +457,7 @@ button.primary, button:not(.icon-button):not(.clear-input):not(.secondary):not(.
   white-space: nowrap;
 }
 
-button.primary:hover, button:not(.icon-button):not(.clear-input):not(.secondary):not(.chip-btn):not(.filter-chip):not(.link-button):not(.close-alert):not(.tab-button):hover {
+button.primary:hover, button:not(.icon-button):not(.quantity-button):not(.clear-input):not(.secondary):not(.chip-btn):not(.filter-chip):not(.link-button):not(.close-alert):not(.tab-button):hover {
   background: var(--primary-hover);
 }
 
@@ -626,7 +627,7 @@ button.secondary:hover {
 }
 
 #inventory-form {
-  grid-template-columns: minmax(0, 1.65fr) minmax(0, 0.75fr) minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.05fr) minmax(150px, 1.25fr);
+  grid-template-columns: minmax(220px, 1.55fr) minmax(130px, 0.8fr) minmax(120px, 0.8fr) minmax(180px, 1.2fr) minmax(190px, 1.2fr) minmax(160px, 1fr) minmax(250px, 1.35fr);
 }
 
 #shopping-form {
@@ -648,7 +649,9 @@ button.secondary:hover {
 }
 
 .field input, .field select {
-  min-height: 44px;
+  height: 48px;
+  min-height: 48px;
+  padding: 10px 12px;
 }
 
 .field-note {
@@ -665,7 +668,7 @@ button.secondary:hover {
   color: var(--text-muted);
   font-size: 0.8rem;
   font-weight: 600;
-  min-height: 44px;
+  min-height: 48px;
   padding: 0 4px;
   cursor: pointer;
   min-width: 0;
@@ -681,7 +684,7 @@ button.secondary:hover {
 
 #inventory-form > button, #shopping-form > button {
   align-self: end;
-  min-height: 44px;
+  min-height: 48px;
   min-width: 0;
   max-width: 100%;
   white-space: normal;
@@ -830,11 +833,11 @@ button.secondary:hover {
 .quantity {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: #ffffff;
-  border: 1px solid var(--border-strong);
+  gap: 5px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  padding: 3px 8px;
+  padding: 3px 5px;
 }
 
 .quantity b {
@@ -857,6 +860,11 @@ button.secondary:hover {
   font-size: 1.15rem;
   line-height: 1;
   padding: 0;
+}
+
+.quantity button {
+  background: var(--primary-light);
+  font-weight: 800;
 }
 
 .quantity button:hover:not(:disabled), .icon-button:hover:not(:disabled) {

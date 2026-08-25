@@ -328,9 +328,9 @@ function inventoryView() {
         </div>
         <div class="item-actions">
           <div class="quantity" role="group" aria-label="Ajustar quantidade de ${esc(item.name)}">
-            <button type="button" data-action="adjust" data-id="${item.id}" data-delta="-1" aria-label="Diminuir 1 ${esc(item.unit)} de ${esc(item.name)}" ${Number(item.quantity) <= 0 || state.submitting ? 'disabled' : ''}>−</button>
+            <button type="button" class="quantity-button" data-action="adjust" data-id="${item.id}" data-delta="-1" aria-label="Diminuir 1 ${esc(item.unit)} de ${esc(item.name)}" ${Number(item.quantity) <= 0 || state.submitting ? 'disabled' : ''}>−</button>
             <b>${esc(item.quantity)}</b>
-            <button type="button" data-action="adjust" data-id="${item.id}" data-delta="1" aria-label="Aumentar 1 ${esc(item.unit)} de ${esc(item.name)}" ${state.submitting ? 'disabled' : ''}>+</button>
+            <button type="button" class="quantity-button" data-action="adjust" data-id="${item.id}" data-delta="1" aria-label="Aumentar 1 ${esc(item.unit)} de ${esc(item.name)}" ${state.submitting ? 'disabled' : ''}>+</button>
           </div>
           <button type="button" class="icon-button danger" data-action="delete-inventory" data-id="${item.id}" aria-label="Excluir ${esc(item.name)} do estoque" title="Excluir item" ${state.submitting ? 'disabled' : ''}>×</button>
         </div>
@@ -408,10 +408,10 @@ function render() {
       ` : ''}
 
       <nav class="tabs" role="tablist" aria-label="Seções do aplicativo">
-        <button type="button" id="tab-inventory" class="${state.tab === 'inventory' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'inventory'}" aria-controls="panel-inventory" data-action="tab" data-tab="inventory">
+        <button type="button" id="tab-inventory" class="tab-button ${state.tab === 'inventory' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'inventory'}" aria-controls="panel-inventory" data-action="tab" data-tab="inventory">
           Estoque <span class="tab-badge" aria-label="${state.inventory.length} itens no estoque">${state.inventory.length}</span>
         </button>
-        <button type="button" id="tab-shopping" class="${state.tab === 'shopping' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'shopping'}" aria-controls="panel-shopping" data-action="tab" data-tab="shopping">
+        <button type="button" id="tab-shopping" class="tab-button ${state.tab === 'shopping' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'shopping'}" aria-controls="panel-shopping" data-action="tab" data-tab="shopping">
           Lista de compras <span class="tab-badge" aria-label="${pendingCount} itens pendentes para comprar">${pendingCount}</span>
         </button>
       </nav>

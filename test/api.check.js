@@ -121,6 +121,11 @@ test('POST /api/commands normaliza unidades por extenso', async () => {
   await request('POST', '/api/commands', { text: 'comprei 5 litros de leite condensado' });
   const item = (await request('GET', '/api/inventory')).json().items.find((entry) => entry.name === 'leite condensado');
   assert.equal(item.unit, 'l');
+
+  const dozen = await request('POST', '/api/commands', { text: 'comprei dúzia de ovos' });
+  assert.equal(dozen.statusCode, 200);
+  assert.equal(dozen.json().item.quantity, 12);
+  assert.equal(dozen.json().item.unit, 'un');
 });
 
 test('POST /api/commands rejeita texto não reconhecido com 422', async () => {
