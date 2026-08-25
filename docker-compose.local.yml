@@ -1,0 +1,4 @@
+services:
+  sous-lite:
+    ports:
+      - "${SOUS_PORT:-3000}:3000"
