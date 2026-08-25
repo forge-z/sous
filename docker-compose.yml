@@ -1,15 +1,15 @@
 services:
-  sous:
+  sous-lite:
     build: .
     restart: unless-stopped
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 3000
       DATA_DIR: /app/data
-    expose:
-      - "3000"
+    ports:
+      - "${SOUS_PORT:-3000}:3000"
     volumes:
-      - sous_data:/app/data
+      - sous_lite_data:/app/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
@@ -17,4 +17,4 @@ services:
       retries: 5
 
 volumes:
-  sous_data:
+  sous_lite_data:

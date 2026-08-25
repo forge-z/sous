@@ -8,133 +8,906 @@ const STORAGE = [
   ['bancada', 'Bancada'],
   ['outro', 'Outro'],
 ];
-const state = { tab: 'inventory', inventory: [], shopping: [], loading: true, error: '', notice: '', commandDraft: '', editingId: null };
+
+const state = {
+  tab: 'inventory',
+  inventory: [],
+  shopping: [],
+  loading: true,
+  submitting: false,
+  error: '',
+  notice: '',
+  noticeType: 'success',
+  commandDraft: '',
+  editingId: null,
+  filterStorage: 'todos',
+  searchQuery: '',
+  cookSuggestion: '',
+  cookLoading: false,
+};
+
 const app = document.querySelector('#app');
+let noticeTimeoutId = null;
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  }[char]));
+}
+
+function announce(message) {
+  const el = document.querySelector('#live-announcer');
+  if (el) el.textContent = message;
+}
+
+function setNotice(message, type = 'success') {
+  state.notice = message;
+  state.noticeType = type;
+  announce(message);
+  if (noticeTimeoutId) clearTimeout(noticeTimeoutId);
+  noticeTimeoutId = setTimeout(() => {
+    state.notice = '';
+    render();
+  }, 4000);
+}
+
+function clearNotice() {
+  state.notice = '';
+  if (noticeTimeoutId) clearTimeout(noticeTimeoutId);
+  render();
+}
+
+function setError(message) {
+  state.error = message;
+  announce(`Erro: ${message}`);
+  render();
+}
+
+function clearError() {
+  state.error = '';
+  render();
+}
+
+function storageLabel(key) {
+  const found = STORAGE.find(([k]) => k === key);
+  return found ? found[1] : (key ? key.charAt(0).toUpperCase() + key.slice(1) : 'Despensa');
+}
+
+function storageOptions(selected = '', includeAutomatic = false) {
+  const autoOption = includeAutomatic ? '<option value="">Automático (sugerir local)</option>' : '';
+  const options = STORAGE.map(
+    ([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`
+  ).join('');
+  return `${autoOption}${options}`;
+}
+
+function parseLocalDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return null;
+  const [y, m, d] = parts.map(Number);
+  if (!y || !m || !d) return null;
+  const date = new Date(y, m - 1, d, 12, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getExpiryInfo(item) {
+  if (!item.expires_on) {
+    return {
+      label: 'Validade não informada',
+      badge: null,
+      badgeClass: '',
+      isExpired: false,
+      isWarning: false,
+    };
+  }
+
+  const expDate = parseLocalDate(item.expires_on);
+  if (!expDate) {
+    return {
+      label: `Validade: ${esc(item.expires_on)}`,
+      badge: null,
+      badgeClass: '',
+      isExpired: false,
+      isWarning: false,
+    };
+  }
+
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+
+  const diffMs = expDate.getTime() - today.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  const formatted = expDate.toLocaleDateString('pt-BR');
+  const prefix = item.expiry_estimated ? 'Validade estimada:' : 'Vence em:';
+
+  if (diffDays < 0) {
+    const pastDays = Math.abs(diffDays);
+    return {
+      label: `Vencido há ${pastDays} ${pastDays === 1 ? 'dia' : 'dias'} (${formatted})`,
+      badge: 'Vencido',
+      badgeClass: 'badge-danger',
+      isExpired: true,
+      isWarning: true,
+    };
+  }
+
+  if (diffDays === 0) {
+    return {
+      label: `Vence hoje (${formatted})`,
+      badge: 'Vence hoje',
+      badgeClass: 'badge-urgent',
+      isExpired: false,
+      isWarning: true,
+    };
+  }
+
+  if (diffDays === 1) {
+    return {
+      label: `Vence amanhã (${formatted})`,
+      badge: 'Vence amanhã',
+      badgeClass: 'badge-urgent',
+      isExpired: false,
+      isWarning: true,
+    };
+  }
+
+  if (diffDays <= 3) {
+    return {
+      label: `Vence em ${diffDays} dias (${formatted})`,
+      badge: `Vence em ${diffDays}d`,
+      badgeClass: 'badge-warning',
+      isExpired: false,
+      isWarning: true,
+    };
+  }
+
+  return {
+    label: `${prefix} ${formatted}`,
+    badge: item.expiry_estimated ? 'Estimada' : null,
+    badgeClass: 'badge-subtle',
+    isExpired: false,
+    isWarning: false,
+  };
+}
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
-  if (options.body !== undefined) headers['content-type'] = 'application/json';
+  if (options.body !== undefined && !headers['content-type']) {
+    headers['content-type'] = 'application/json';
+  }
   const response = await fetch(path, { ...options, headers });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Não foi possível concluir a operação (${response.status}).`);
+  if (!response.ok) {
+    throw new Error(data.error || `Não foi possível concluir a operação (${response.status}).`);
+  }
   return data;
 }
 
-async function load() {
-  state.loading = true;
-  render();
+async function load(silent = false) {
+  if (!silent) {
+    state.loading = true;
+    render();
+  }
   try {
     const [inventory, shopping] = await Promise.all([api('/api/inventory'), api('/api/shopping')]);
-    state.inventory = inventory.items;
-    state.shopping = shopping.items;
+    state.inventory = inventory.items || [];
+    state.shopping = shopping.items || [];
     state.error = '';
-  } catch (error) { state.error = error.message; }
-  state.loading = false;
-  render();
+  } catch (error) {
+    state.error = error.message;
+  } finally {
+    state.loading = false;
+    render();
+  }
 }
 
-function esc(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+function getFilteredInventory() {
+  let list = state.inventory;
+
+  if (state.searchQuery.trim()) {
+    const q = state.searchQuery.toLowerCase().trim();
+    list = list.filter((item) =>
+      item.name.toLowerCase().includes(q) ||
+      (item.storage_location && item.storage_location.toLowerCase().includes(q))
+    );
+  }
+
+  if (state.filterStorage === 'alertas') {
+    list = list.filter((item) => {
+      const exp = getExpiryInfo(item);
+      return item.low_stock || exp.isWarning || exp.isExpired;
+    });
+  } else if (state.filterStorage !== 'todos') {
+    list = list.filter((item) => (item.storage_location || 'despensa') === state.filterStorage);
+  }
+
+  return list;
 }
 
-function storageOptions(selected = '', automatic = false) {
-  return `${automatic ? '<option value="">Automático</option>' : ''}${STORAGE.map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`).join('')}`;
+function inventoryCountByStorage(storageKey) {
+  if (storageKey === 'todos') return state.inventory.length;
+  if (storageKey === 'alertas') {
+    return state.inventory.filter((item) => {
+      const exp = getExpiryInfo(item);
+      return item.low_stock || exp.isWarning || exp.isExpired;
+    }).length;
+  }
+  return state.inventory.filter((item) => (item.storage_location || 'despensa') === storageKey).length;
 }
-
-function dateLabel(item) {
-  if (!item.expires_on) return 'Validade não informada';
-  const date = new Date(`${item.expires_on}T12:00:00`);
-  const formatted = Number.isNaN(date.getTime()) ? item.expires_on : date.toLocaleDateString('pt-BR');
-  return `${item.expiry_estimated ? 'Validade estimada' : 'Vence'} em ${formatted}`;
-}
-
-function itemLabel(item) { return `${esc(item.quantity)} ${esc(item.unit)} · ${esc(item.name)}`; }
 
 function inventoryView() {
-  if (!state.inventory.length) return '<div class="empty"><strong>Seu estoque está vazio.</strong><span>Adicione um item ou escreva um comando acima.</span></div>';
-  return state.inventory.map((item) => `<article class="item ${item.low_stock ? 'low' : ''}">
-    <div class="item-main"><div class="item-title"><strong>${esc(item.name)}</strong>${item.low_stock ? '<span class="badge warning">baixo</span>' : ''}</div><small>${esc(item.quantity)} ${esc(item.unit)} · ${esc(item.storage_location || 'despensa')}</small><small class="muted">${dateLabel(item)}</small>
-      <details class="item-details" ${state.editingId === item.id ? 'open' : ''}><summary>Editar detalhes</summary><form class="details-form" data-form="edit-inventory" data-id="${item.id}"><label>Local<select name="storage_location">${storageOptions(item.storage_location || 'despensa', true)}</select></label><label>Validade<input name="expires_on" type="date" value="${esc(item.expires_on || '')}"></label><button>Salvar</button></form></details>
-    </div>
-    <div class="quantity"><button type="button" data-action="adjust" data-id="${item.id}" data-delta="-1" aria-label="Diminuir">−</button><b>${esc(item.quantity)}</b><button type="button" data-action="adjust" data-id="${item.id}" data-delta="1" aria-label="Aumentar">+</button></div>
-    <button type="button" class="icon-button danger" data-action="delete-inventory" data-id="${item.id}" aria-label="Excluir ${esc(item.name)}">×</button>
-  </article>`).join('');
+  const filtered = getFilteredInventory();
+
+  if (!state.inventory.length) {
+    return `
+      <div class="empty">
+        <div class="empty-icon" aria-hidden="true">🧺</div>
+        <strong>Seu estoque está vazio.</strong>
+        <p>Adicione um item no formulário acima ou use o comando rápido (ex: <em>“comprei 2kg de arroz”</em>).</p>
+      </div>`;
+  }
+
+  if (!filtered.length) {
+    return `
+      <div class="empty">
+        <div class="empty-icon" aria-hidden="true">🔍</div>
+        <strong>Nenhum item encontrado com o filtro selecionado.</strong>
+        <p>Tente limpar a busca ou selecionar outro local de armazenamento.</p>
+        <div>
+          <button type="button" class="secondary" data-action="reset-filter">Limpar filtros</button>
+        </div>
+      </div>`;
+  }
+
+  return filtered.map((item) => {
+    const exp = getExpiryInfo(item);
+    const isLow = Boolean(item.low_stock);
+    const isExpired = exp.isExpired;
+    const isEditing = state.editingId === item.id;
+
+    let itemClasses = 'item';
+    if (isExpired) itemClasses += ' expired';
+    else if (isLow) itemClasses += ' low-stock';
+
+    return `
+      <article class="${itemClasses}" data-item-id="${item.id}">
+        <div class="item-main">
+          <div class="item-title">
+            <strong>${esc(item.name)}</strong>
+            ${isLow ? '<span class="badge badge-warning" title="Estoque igual ou menor que o mínimo">Estoque baixo</span>' : ''}
+            ${exp.badge ? `<span class="badge ${exp.badgeClass}">${esc(exp.badge)}</span>` : ''}
+          </div>
+          <div class="item-meta">
+            <small><strong>${esc(item.quantity)} ${esc(item.unit)}</strong> · Local: <em>${esc(storageLabel(item.storage_location))}</em></small>
+            <small class="${exp.isWarning || exp.isExpired ? '' : 'muted'}">${esc(exp.label)}</small>
+          </div>
+          <details class="item-details" ${isEditing ? 'open' : ''} data-id="${item.id}">
+            <summary data-action="toggle-edit" data-id="${item.id}">${isEditing ? 'Ocultar detalhes' : 'Editar detalhes'}</summary>
+            <form class="details-form" data-form="edit-inventory" data-id="${item.id}">
+              <label>
+                Nome
+                <input name="name" required value="${esc(item.name)}">
+              </label>
+              <label>
+                Quantidade
+                <input name="quantity" type="number" min="0" step="0.1" value="${esc(item.quantity)}">
+              </label>
+              <label>
+                Unidade
+                <select name="unit">
+                  <option value="un" ${item.unit === 'un' ? 'selected' : ''}>un</option>
+                  <option value="kg" ${item.unit === 'kg' ? 'selected' : ''}>kg</option>
+                  <option value="g" ${item.unit === 'g' ? 'selected' : ''}>g</option>
+                  <option value="l" ${item.unit === 'l' ? 'selected' : ''}>l</option>
+                  <option value="ml" ${item.unit === 'ml' ? 'selected' : ''}>ml</option>
+                </select>
+              </label>
+              <label>
+                Local
+                <select name="storage_location">${storageOptions(item.storage_location || 'despensa', true)}</select>
+              </label>
+              <label>
+                Estoque Mínimo
+                <input name="min_quantity" type="number" min="0" step="0.1" value="${esc(item.min_quantity ?? 0)}" title="Alerta quando a quantidade for menor ou igual a este valor">
+              </label>
+              <label>
+                Validade
+                <input name="expires_on" type="date" value="${esc(item.expires_on || '')}">
+              </label>
+              <div class="details-form-actions">
+                <button type="submit" class="primary" ${state.submitting ? 'disabled' : ''}>Salvar</button>
+                <button type="button" class="secondary" data-action="close-edit">Cancelar</button>
+              </div>
+            </form>
+          </details>
+        </div>
+        <div class="item-actions">
+          <div class="quantity" role="group" aria-label="Ajustar quantidade de ${esc(item.name)}">
+            <button type="button" data-action="adjust" data-id="${item.id}" data-delta="-1" aria-label="Diminuir 1 ${esc(item.unit)} de ${esc(item.name)}" ${Number(item.quantity) <= 0 || state.submitting ? 'disabled' : ''}>−</button>
+            <b>${esc(item.quantity)}</b>
+            <button type="button" data-action="adjust" data-id="${item.id}" data-delta="1" aria-label="Aumentar 1 ${esc(item.unit)} de ${esc(item.name)}" ${state.submitting ? 'disabled' : ''}>+</button>
+          </div>
+          <button type="button" class="icon-button danger" data-action="delete-inventory" data-id="${item.id}" aria-label="Excluir ${esc(item.name)} do estoque" title="Excluir item" ${state.submitting ? 'disabled' : ''}>×</button>
+        </div>
+      </article>`;
+  }).join('');
 }
 
 function shoppingView() {
-  if (!state.shopping.length) return '<div class="empty"><strong>A lista de compras está vazia.</strong><span>Adicione o que estiver faltando.</span></div>';
-  return state.shopping.map((item) => `<article class="item ${item.checked ? 'checked' : ''}">
-    <label class="shopping-label"><input type="checkbox" data-action="toggle-shopping" data-id="${item.id}" ${item.checked ? 'checked' : ''}><span>${itemLabel(item)}</span></label>
-    <button type="button" class="icon-button danger" data-action="delete-shopping" data-id="${item.id}" aria-label="Excluir ${esc(item.name)}">×</button>
-  </article>`).join('');
+  if (!state.shopping.length) {
+    return `
+      <div class="empty">
+        <div class="empty-icon" aria-hidden="true">🛒</div>
+        <strong>Sua lista de compras está vazia.</strong>
+        <p>Adicione os itens que estão faltando ou digite um comando (ex: <em>“comprar 1 café e açúcar”</em>).</p>
+      </div>`;
+  }
+
+  const pendingItems = state.shopping.filter((item) => !item.checked);
+  const completedItems = state.shopping.filter((item) => item.checked);
+
+  return state.shopping.map((item) => `
+    <article class="item ${item.checked ? 'checked' : ''}" data-item-id="${item.id}">
+      <label class="shopping-label">
+        <input type="checkbox" data-action="toggle-shopping" data-id="${item.id}" ${item.checked ? 'checked' : ''} aria-label="Marcar ${esc(item.name)} como comprado">
+        <div class="shopping-text">
+          <strong>${esc(item.name)}</strong>
+          <small>${esc(item.quantity)} ${esc(item.unit)}</small>
+        </div>
+      </label>
+      <div class="item-actions">
+        <button type="button" class="icon-button danger" data-action="delete-shopping" data-id="${item.id}" aria-label="Excluir ${esc(item.name)} da lista" title="Excluir item" ${state.submitting ? 'disabled' : ''}>×</button>
+      </div>
+    </article>
+  `).join('');
 }
 
 function render() {
-  app.innerHTML = `<div class="shell">
-    <header><div><p class="eyebrow">COZINHA LOCAL · PT-BR</p><h1>Sous</h1><p class="subtitle">Seu estoque, sua lista, sem complicação.</p></div><span class="status"><i></i> offline-first</span></header>
-    ${state.error ? `<div class="alert error"><span>${esc(state.error)}</span><button type="button" data-action="reload">Tentar novamente</button></div>` : ''}
-    ${state.notice ? `<div class="alert success">${esc(state.notice)}</div>` : ''}
-    <nav class="tabs" aria-label="Seções principais"><button type="button" class="${state.tab === 'inventory' ? 'active' : ''}" aria-pressed="${state.tab === 'inventory'}" data-action="tab" data-tab="inventory">Estoque <span>${state.inventory.length}</span></button><button type="button" class="${state.tab === 'shopping' ? 'active' : ''}" aria-pressed="${state.tab === 'shopping'}" data-action="tab" data-tab="shopping">Lista de compras <span>${state.shopping.filter((item) => !item.checked).length}</span></button></nav>
-    <section class="command"><div class="section-kicker"><span>COMANDO RÁPIDO</span><small>Separe vários itens com vírgulas ou “e”</small></div><form id="command-form"><div class="command-input"><input id="command-input" name="text" value="${esc(state.commandDraft)}" placeholder="Ex.: comprei arroz, leite e 1 kg de macarrão" autocomplete="off"><button type="button" class="clear-input" data-action="clear-command" aria-label="Limpar texto">×</button></div><button>Registrar</button></form><small class="hint">Ex.: “comprei frango, 6 litros de leite e 1 kg de macarrão”.</small></section>
-    ${state.loading ? '<div class="loading">Carregando…</div>' : state.tab === 'inventory' ? `<section class="panel"><div class="section-heading"><div><p class="eyebrow">CONTROLE RÁPIDO</p><h2>Estoque</h2><p class="section-copy">Leite fechado vai para a despensa; carnes e itens abertos vão para a geladeira.</p></div><button type="button" class="secondary" data-action="cook">O que posso cozinhar?</button></div><form id="inventory-form" class="add-form"><label class="field item-field">Item<input name="name" required placeholder="Ex.: arroz"></label><label class="field quantity-field">Quantidade<input name="quantity" type="number" min="0" step="0.1" value="1"></label><label class="field unit-field">Unidade<select name="unit"><option>un</option><option>kg</option><option>g</option><option>l</option><option>ml</option></select></label><label class="field location-field">Local<select name="storage_location">${storageOptions('', true)}</select></label><label class="field expiry-field">Validade<input name="expires_on" type="date"><span class="field-note">vazio = estimar</span></label><label class="auto-check"><input name="auto_expiry" type="checkbox" checked> Estimar validade</label><button>Adicionar</button></form><div class="list">${inventoryView()}</div><div id="cook-result" class="cook-result"></div></section>` : `<section class="panel"><div class="section-heading"><div><p class="eyebrow">PRÓXIMA COMPRA</p><h2>Lista de compras</h2></div></div><form id="shopping-form" class="add-form"><label class="field item-field">Item<input name="name" required placeholder="Ex.: café"></label><label class="field quantity-field">Quantidade<input name="quantity" type="number" min="0" step="0.1" value="1"></label><label class="field unit-field">Unidade<select name="unit"><option>un</option><option>kg</option><option>g</option><option>l</option><option>ml</option></select></label><button>Adicionar</button></form><div class="list">${shoppingView()}</div></section>`}
-  </div>`;
+  const pendingCount = state.shopping.filter((item) => !item.checked).length;
+  const hasCompletedShopping = state.shopping.some((item) => item.checked);
+  const alertsCount = inventoryCountByStorage('alertas');
+
+  app.innerHTML = `
+    <div id="live-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    <div class="shell">
+      <header>
+        <div>
+          <p class="eyebrow">COZINHA INTELIGENTE · SOUS LITE</p>
+          <h1>Sous</h1>
+          <p class="subtitle">Seu estoque e sua lista de compras sincronizados, sem complicação.</p>
+        </div>
+        <span class="status"><i></i> offline-first pronto</span>
+      </header>
+
+      ${state.error ? `
+        <div class="alert error" role="alert">
+          <div class="alert-content">
+            <span aria-hidden="true">⚠️</span>
+            <span>${esc(state.error)}</span>
+          </div>
+          <div class="alert-actions">
+            <button type="button" class="link-button" data-action="reload">Tentar novamente</button>
+            <button type="button" class="close-alert" data-action="clear-error" aria-label="Fechar aviso de erro">×</button>
+          </div>
+        </div>
+      ` : ''}
+
+      ${state.notice ? `
+        <div class="alert success" role="status">
+          <div class="alert-content">
+            <span aria-hidden="true">✓</span>
+            <span>${esc(state.notice)}</span>
+          </div>
+          <button type="button" class="close-alert" data-action="clear-notice" aria-label="Fechar aviso">×</button>
+        </div>
+      ` : ''}
+
+      <nav class="tabs" role="tablist" aria-label="Seções do aplicativo">
+        <button type="button" id="tab-inventory" class="${state.tab === 'inventory' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'inventory'}" aria-controls="panel-inventory" data-action="tab" data-tab="inventory">
+          Estoque <span class="tab-badge" aria-label="${state.inventory.length} itens no estoque">${state.inventory.length}</span>
+        </button>
+        <button type="button" id="tab-shopping" class="${state.tab === 'shopping' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'shopping'}" aria-controls="panel-shopping" data-action="tab" data-tab="shopping">
+          Lista de compras <span class="tab-badge" aria-label="${pendingCount} itens pendentes para comprar">${pendingCount}</span>
+        </button>
+      </nav>
+
+      <section class="command" aria-label="Entrada de comandos rápidos">
+        <div class="section-kicker">
+          <span>COMANDO RÁPIDO EM LINGUAGEM NATURAL</span>
+          <small>Separe múltiplos itens por vírgulas ou “e”</small>
+        </div>
+        <form id="command-form">
+          <div class="command-input-wrapper">
+            <input
+              id="command-input"
+              name="text"
+              value="${esc(state.commandDraft)}"
+              placeholder="Ex.: comprei 2 kg de arroz, 1 leite e 500g de queijo"
+              autocomplete="off"
+              aria-label="Comando rápido de compras ou estoque"
+            >
+            ${state.commandDraft ? `<button type="button" class="clear-input" data-action="clear-command" aria-label="Limpar texto">×</button>` : ''}
+          </div>
+          <button type="submit" class="primary" ${state.submitting ? 'disabled' : ''}>
+            ${state.submitting ? 'Processando…' : 'Registrar'}
+          </button>
+        </form>
+        <div class="command-chips" aria-label="Exemplos rápidos de comando">
+          <span>Exemplos:</span>
+          <button type="button" class="chip-btn" data-action="chip-fill" data-text="comprei 2 kg de arroz e 1 feijao">“comprei 2 kg de arroz e 1 feijao”</button>
+          <button type="button" class="chip-btn" data-action="chip-fill" data-text="comprar café e azeite">“comprar café e azeite”</button>
+          <button type="button" class="chip-btn" data-action="chip-fill" data-text="comprei frango, 6 ovos e 1kg de tomate">“comprei frango, 6 ovos e 1kg de tomate”</button>
+        </div>
+      </section>
+
+      ${state.loading ? `
+        <div class="loading">
+          <div class="empty-icon" aria-hidden="true">⏳</div>
+          <strong>Carregando seus dados…</strong>
+          <p>Conectando ao banco de dados da cozinha.</p>
+        </div>
+      ` : state.tab === 'inventory' ? `
+        <section id="panel-inventory" class="panel" role="tabpanel" aria-labelledby="tab-inventory">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">DISPENSA &amp; GELADEIRA</p>
+              <h2>Estoque da Cozinha</h2>
+              <p class="section-copy">Monitore validades, locais de armazenamento e receba alertas de reposição.</p>
+            </div>
+            <div class="heading-actions">
+              <button type="button" class="secondary" data-action="cook" ${state.cookLoading ? 'disabled' : ''}>
+                ${state.cookLoading ? 'Pensando na receita…' : '🍳 O que posso cozinhar?'}
+              </button>
+            </div>
+          </div>
+
+          ${state.cookSuggestion ? `
+            <div class="cook-card" role="region" aria-label="Sugestão do Chef">
+              <div class="cook-card-content">
+                <div class="cook-card-title">
+                  <span aria-hidden="true">👨‍🍳</span>
+                  <span>Sugestão do Chef Sous</span>
+                </div>
+                <p>${esc(state.cookSuggestion)}</p>
+              </div>
+              <button type="button" class="icon-button" data-action="close-cook" aria-label="Fechar sugestão" title="Fechar sugestão">×</button>
+            </div>
+          ` : ''}
+
+          <form id="inventory-form" class="add-form" aria-label="Adicionar item ao estoque">
+            <label class="field item-field">
+              Item *
+              <input name="name" required placeholder="Ex.: arroz" autocomplete="off">
+            </label>
+            <label class="field quantity-field">
+              Quantidade
+              <input name="quantity" type="number" min="0" step="0.1" value="1">
+            </label>
+            <label class="field unit-field">
+              Unidade
+              <select name="unit">
+                <option value="un">un</option>
+                <option value="kg">kg</option>
+                <option value="g">g</option>
+                <option value="l">l</option>
+                <option value="ml">ml</option>
+              </select>
+            </label>
+            <label class="field location-field">
+              Local
+              <select name="storage_location">${storageOptions('', true)}</select>
+            </label>
+            <label class="field expiry-field">
+              Validade
+              <input name="expires_on" type="date">
+              <span class="field-note">vazio = estimativa auto</span>
+            </label>
+            <label class="auto-check">
+              <input name="auto_expiry" type="checkbox" checked>
+              Estimar validade
+            </label>
+            <button type="submit" class="primary" ${state.submitting ? 'disabled' : ''}>+ Adicionar ao Estoque</button>
+          </form>
+
+          <div class="filter-bar" aria-label="Filtros do estoque">
+            <div class="filter-chips" role="toolbar" aria-label="Filtrar por local">
+              <button type="button" class="filter-chip ${state.filterStorage === 'todos' ? 'active' : ''}" data-action="filter-storage" data-filter="todos">
+                Todos (${inventoryCountByStorage('todos')})
+              </button>
+              <button type="button" class="filter-chip ${state.filterStorage === 'geladeira' ? 'active' : ''}" data-action="filter-storage" data-filter="geladeira">
+                Geladeira (${inventoryCountByStorage('geladeira')})
+              </button>
+              <button type="button" class="filter-chip ${state.filterStorage === 'despensa' ? 'active' : ''}" data-action="filter-storage" data-filter="despensa">
+                Despensa (${inventoryCountByStorage('despensa')})
+              </button>
+              <button type="button" class="filter-chip ${state.filterStorage === 'freezer' ? 'active' : ''}" data-action="filter-storage" data-filter="freezer">
+                Freezer (${inventoryCountByStorage('freezer')})
+              </button>
+              <button type="button" class="filter-chip ${state.filterStorage === 'fruteira' ? 'active' : ''}" data-action="filter-storage" data-filter="fruteira">
+                Fruteira (${inventoryCountByStorage('fruteira')})
+              </button>
+              ${alertsCount > 0 ? `
+                <button type="button" class="filter-chip ${state.filterStorage === 'alertas' ? 'active' : ''}" data-action="filter-storage" data-filter="alertas">
+                  ⚠️ Alertas (${alertsCount})
+                </button>
+              ` : ''}
+            </div>
+            <div class="filter-search">
+              <input
+                id="search-input"
+                type="search"
+                placeholder="Buscar no estoque…"
+                value="${esc(state.searchQuery)}"
+                aria-label="Buscar item no estoque"
+              >
+              ${state.searchQuery ? `<button type="button" class="clear-search" data-action="clear-search" aria-label="Limpar busca">×</button>` : ''}
+            </div>
+          </div>
+
+          <div class="list" role="feed" aria-label="Lista de itens em estoque">
+            ${inventoryView()}
+          </div>
+        </section>
+      ` : `
+        <section id="panel-shopping" class="panel" role="tabpanel" aria-labelledby="tab-shopping">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">PLANEJAMENTO DE COMPRAS</p>
+              <h2>Lista de Compras</h2>
+              <p class="section-copy">Marque os itens conforme for ao mercado para manter sua despensa abastecida.</p>
+            </div>
+            <div class="heading-actions">
+              ${hasCompletedShopping ? `
+                <button type="button" class="secondary" data-action="clear-completed-shopping" ${state.submitting ? 'disabled' : ''}>
+                  Limpar comprados
+                </button>
+              ` : ''}
+            </div>
+          </div>
+
+          <form id="shopping-form" class="add-form" aria-label="Adicionar item à lista de compras">
+            <label class="field item-field">
+              Item *
+              <input name="name" required placeholder="Ex.: café em pó" autocomplete="off">
+            </label>
+            <label class="field quantity-field">
+              Quantidade
+              <input name="quantity" type="number" min="0" step="0.1" value="1">
+            </label>
+            <label class="field unit-field">
+              Unidade
+              <select name="unit">
+                <option value="un">un</option>
+                <option value="kg">kg</option>
+                <option value="g">g</option>
+                <option value="l">l</option>
+                <option value="ml">ml</option>
+              </select>
+            </label>
+            <button type="submit" class="primary" ${state.submitting ? 'disabled' : ''}>+ Adicionar à Lista</button>
+          </form>
+
+          <div class="list" role="feed" aria-label="Itens da lista de compras">
+            ${shoppingView()}
+          </div>
+        </section>
+      `}
+    </div>`;
 }
 
+// Event Listeners
+
 app.addEventListener('input', (event) => {
-  if (event.target.id === 'command-input') state.commandDraft = event.target.value;
+  if (event.target.id === 'command-input') {
+    state.commandDraft = event.target.value;
+  }
+  if (event.target.id === 'search-input') {
+    state.searchQuery = event.target.value;
+    const listEl = app.querySelector('.list');
+    if (listEl && state.tab === 'inventory') {
+      listEl.innerHTML = inventoryView();
+    }
+  }
 });
 
 app.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && event.target.id === 'command-input') { state.commandDraft = ''; render(); document.querySelector('#command-input')?.focus(); }
+  if (event.key === 'Escape') {
+    if (event.target.id === 'command-input') {
+      state.commandDraft = '';
+      render();
+      document.querySelector('#command-input')?.focus();
+    } else if (event.target.id === 'search-input') {
+      state.searchQuery = '';
+      render();
+      document.querySelector('#search-input')?.focus();
+    }
+  }
+
+  // Keyboard navigation for tabs
+  if (event.target.getAttribute('role') === 'tab') {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+      const nextTab = state.tab === 'inventory' ? 'shopping' : 'inventory';
+      state.tab = nextTab;
+      state.error = '';
+      render();
+      document.querySelector(`#tab-${nextTab}`)?.focus();
+    }
+  }
 });
 
 app.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
+
+  const action = button.dataset.action;
+
   try {
-    if (button.dataset.action === 'clear-command') { state.commandDraft = ''; render(); document.querySelector('#command-input')?.focus(); return; }
-    if (button.dataset.action === 'tab') { state.tab = button.dataset.tab; state.notice = ''; render(); return; }
-    if (button.dataset.action === 'reload') { await load(); return; }
-    if (button.dataset.action === 'adjust') {
-      const item = state.inventory.find((entry) => entry.id === Number(button.dataset.id));
-      await api(`/api/inventory/${item.id}`, { method: 'PATCH', body: JSON.stringify({ quantity: Math.max(0, Number(item.quantity) + Number(button.dataset.delta)) }) });
-      await load(); return;
+    if (action === 'tab') {
+      state.tab = button.dataset.tab;
+      state.error = '';
+      render();
+      return;
     }
-    if (button.dataset.action === 'delete-inventory') { await api(`/api/inventory/${button.dataset.id}`, { method: 'DELETE' }); state.notice = 'Item removido do estoque.'; await load(); return; }
-    if (button.dataset.action === 'delete-shopping') { await api(`/api/shopping/${button.dataset.id}`, { method: 'DELETE' }); state.notice = 'Item removido da lista.'; await load(); return; }
-    if (button.dataset.action === 'cook') { const result = await api('/api/cook', { method: 'POST', body: '{}' }); document.querySelector('#cook-result').textContent = result.suggestion; }
-  } catch (error) { state.error = error.message; render(); }
+
+    if (action === 'clear-command') {
+      state.commandDraft = '';
+      render();
+      document.querySelector('#command-input')?.focus();
+      return;
+    }
+
+    if (action === 'chip-fill') {
+      state.commandDraft = button.dataset.text || '';
+      render();
+      const input = document.querySelector('#command-input');
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
+      return;
+    }
+
+    if (action === 'clear-search' || action === 'reset-filter') {
+      state.searchQuery = '';
+      state.filterStorage = 'todos';
+      render();
+      return;
+    }
+
+    if (action === 'filter-storage') {
+      state.filterStorage = button.dataset.filter;
+      render();
+      return;
+    }
+
+    if (action === 'clear-notice') {
+      clearNotice();
+      return;
+    }
+
+    if (action === 'clear-error') {
+      clearError();
+      return;
+    }
+
+    if (action === 'reload') {
+      await load();
+      return;
+    }
+
+    if (action === 'toggle-edit') {
+      const id = Number(button.dataset.id);
+      state.editingId = state.editingId === id ? null : id;
+      render();
+      return;
+    }
+
+    if (action === 'close-edit') {
+      state.editingId = null;
+      render();
+      return;
+    }
+
+    if (action === 'adjust') {
+      const id = Number(button.dataset.id);
+      const delta = Number(button.dataset.delta);
+      const item = state.inventory.find((entry) => entry.id === id);
+      if (!item) return;
+
+      const currentQty = Number(item.quantity) || 0;
+      const newQty = Math.max(0, Math.round((currentQty + delta) * 100) / 100);
+
+      state.submitting = true;
+      button.disabled = true;
+
+      await api(`/api/inventory/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ quantity: newQty }),
+      });
+
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'delete-inventory') {
+      const id = Number(button.dataset.id);
+      const item = state.inventory.find((entry) => entry.id === id);
+      const itemName = item ? item.name : 'Item';
+
+      state.submitting = true;
+      button.disabled = true;
+
+      await api(`/api/inventory/${id}`, { method: 'DELETE' });
+      setNotice(`"${itemName}" removido do estoque.`);
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'delete-shopping') {
+      const id = Number(button.dataset.id);
+      const item = state.shopping.find((entry) => entry.id === id);
+      const itemName = item ? item.name : 'Item';
+
+      state.submitting = true;
+      button.disabled = true;
+
+      await api(`/api/shopping/${id}`, { method: 'DELETE' });
+      setNotice(`"${itemName}" removido da lista.`);
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'clear-completed-shopping') {
+      const completed = state.shopping.filter((item) => item.checked);
+      if (!completed.length) return;
+
+      state.submitting = true;
+      render();
+
+      await Promise.all(completed.map((item) => api(`/api/shopping/${item.id}`, { method: 'DELETE' })));
+      setNotice(`${completed.length} ${completed.length === 1 ? 'item comprado removido' : 'itens comprados removidos'}.`);
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'cook') {
+      state.cookLoading = true;
+      render();
+      const result = await api('/api/cook', { method: 'POST', body: '{}' });
+      state.cookSuggestion = result.suggestion;
+      state.cookLoading = false;
+      render();
+      return;
+    }
+
+    if (action === 'close-cook') {
+      state.cookSuggestion = '';
+      render();
+      return;
+    }
+  } catch (error) {
+    state.submitting = false;
+    state.cookLoading = false;
+    setError(error.message);
+  }
 });
 
 app.addEventListener('change', async (event) => {
   const input = event.target.closest('[data-action="toggle-shopping"]');
   if (!input) return;
-  try { await api(`/api/shopping/${input.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ checked: input.checked }) }); await load(); }
-  catch (error) { state.error = error.message; render(); }
+
+  try {
+    const id = Number(input.dataset.id);
+    const checked = input.checked;
+    await api(`/api/shopping/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ checked }),
+    });
+    await load(true);
+  } catch (error) {
+    setError(error.message);
+  }
 });
 
 app.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.target;
+
   try {
+    state.submitting = true;
+
     if (form.id === 'command-form') {
-      if (!state.commandDraft.trim()) return;
-      const result = await api('/api/commands', { method: 'POST', body: JSON.stringify({ text: state.commandDraft }) });
+      const text = state.commandDraft.trim();
+      if (!text) {
+        state.submitting = false;
+        return;
+      }
+
+      const result = await api('/api/commands', {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+      });
+
       state.commandDraft = '';
-      state.notice = result.items?.length > 1 ? `${result.items.length} itens registrados.` : 'Item registrado.';
+      const count = result.items?.length || 1;
+      setNotice(count > 1 ? `${count} itens registrados com sucesso!` : 'Item registrado com sucesso!');
+      state.error = '';
+      state.submitting = false;
+      await load(true);
+      return;
     }
+
     if (form.id === 'inventory-form') {
-      const body = Object.fromEntries(new FormData(form));
+      const formData = new FormData(form);
+      const body = Object.fromEntries(formData);
       body.auto_expiry = form.elements.auto_expiry.checked;
-      await api('/api/inventory', { method: 'POST', body: JSON.stringify(body) });
-      state.notice = 'Item adicionado ao estoque.';
+
+      await api('/api/inventory', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+
+      const itemName = body.name || 'Item';
+      form.reset();
+      // Keep auto_expiry checked by default
+      if (form.elements.auto_expiry) form.elements.auto_expiry.checked = true;
+
+      setNotice(`"${itemName}" adicionado ao estoque.`);
+      state.error = '';
+      state.submitting = false;
+      await load(true);
+      return;
     }
-    if (form.id === 'shopping-form') { await api('/api/shopping', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); state.notice = 'Item adicionado à lista.'; }
-    if (form.dataset.form === 'edit-inventory') { await api(`/api/inventory/${form.dataset.id}`, { method: 'PATCH', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); state.editingId = null; state.notice = 'Detalhes atualizados.'; }
-    state.error = '';
-    await load();
-  } catch (error) { state.error = error.message; render(); }
+
+    if (form.id === 'shopping-form') {
+      const formData = new FormData(form);
+      const body = Object.fromEntries(formData);
+
+      await api('/api/shopping', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+
+      const itemName = body.name || 'Item';
+      form.reset();
+
+      setNotice(`"${itemName}" adicionado à lista de compras.`);
+      state.error = '';
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (form.dataset.form === 'edit-inventory') {
+      const id = Number(form.dataset.id);
+      const formData = new FormData(form);
+      const body = Object.fromEntries(formData);
+
+      await api(`/api/inventory/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+
+      state.editingId = null;
+      setNotice('Detalhes do item atualizados com sucesso.');
+      state.error = '';
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+  } catch (error) {
+    state.submitting = false;
+    setError(error.message);
+  }
 });
 
+// Initial startup
 render();
 load();
