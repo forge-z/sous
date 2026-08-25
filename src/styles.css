@@ -617,6 +617,7 @@ button.secondary:hover {
   display: grid;
   gap: 12px;
   align-items: end;
+  min-width: 0;
   background: var(--bg-card-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -625,11 +626,15 @@ button.secondary:hover {
 }
 
 #inventory-form {
-  grid-template-columns: minmax(160px, 2fr) minmax(90px, 1fr) minmax(80px, 0.9fr) minmax(130px, 1.2fr) minmax(140px, 1.2fr) auto auto;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 0.75fr) minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.05fr) minmax(150px, 1.25fr);
 }
 
 #shopping-form {
-  grid-template-columns: minmax(180px, 2fr) minmax(100px, 1fr) minmax(90px, 0.9fr) auto;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(130px, auto);
+}
+
+.add-form > * {
+  min-width: 0;
 }
 
 .field {
@@ -663,7 +668,8 @@ button.secondary:hover {
   min-height: 44px;
   padding: 0 4px;
   cursor: pointer;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
 }
 
 .auto-check input {
@@ -676,6 +682,9 @@ button.secondary:hover {
 #inventory-form > button, #shopping-form > button {
   align-self: end;
   min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
 }
 
 /* Items List */
@@ -981,22 +990,24 @@ button.secondary:hover {
 }
 
 /* Responsive Media Queries */
-@media (max-width: 960px) {
+@media (max-width: 1100px) {
   #inventory-form {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   #inventory-form .item-field {
-    grid-column: 1 / -1;
+    grid-column: span 2;
   }
+  #inventory-form .location-field,
+  #inventory-form .expiry-field,
   #inventory-form .auto-check {
     grid-column: span 2;
   }
   #inventory-form > button {
-    grid-column: 3;
+    grid-column: span 2;
     justify-self: stretch;
   }
   #shopping-form {
-    grid-template-columns: 2fr 1fr 1fr auto;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(130px, auto);
   }
 }
 
@@ -1034,6 +1045,9 @@ button.secondary:hover {
   }
   #inventory-form .item-field, #shopping-form .item-field {
     grid-column: 1 / -1;
+  }
+  #inventory-form .location-field, #inventory-form .expiry-field {
+    grid-column: span 1;
   }
   #inventory-form .auto-check {
     grid-column: 1 / -1;
@@ -1074,6 +1088,9 @@ button.secondary:hover {
   }
   #inventory-form, #shopping-form {
     grid-template-columns: 1fr;
+  }
+  #inventory-form .location-field, #inventory-form .expiry-field {
+    grid-column: 1 / -1;
   }
   .tabs button {
     min-height: 44px;
