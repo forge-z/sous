@@ -627,7 +627,7 @@ button.secondary:hover {
 }
 
 #inventory-form {
-  grid-template-columns: minmax(220px, 1.55fr) minmax(130px, 0.8fr) minmax(120px, 0.8fr) minmax(180px, 1.2fr) minmax(190px, 1.2fr) minmax(160px, 1fr) minmax(250px, 1.35fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.35fr);
 }
 
 #shopping-form {
