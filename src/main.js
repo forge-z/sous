@@ -24,10 +24,17 @@ const state = {
   searchQuery: '',
   cookSuggestion: '',
   cookLoading: false,
+  undo: null,
 };
 
 const app = document.querySelector('#app');
+const quantityFormat = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 });
 let noticeTimeoutId = null;
+
+function formatQuantity(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? quantityFormat.format(number) : String(value ?? '');
+}
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -44,21 +51,25 @@ function announce(message) {
   if (el) el.textContent = message;
 }
 
-function setNotice(message, type = 'success') {
+function setNotice(message, type = 'success', undo = null) {
   state.notice = message;
   state.noticeType = type;
+  state.undo = undo;
   announce(message);
   if (noticeTimeoutId) clearTimeout(noticeTimeoutId);
+  render();
   noticeTimeoutId = setTimeout(() => {
     state.notice = '';
-    render();
-  }, 4000);
+    state.undo = null;
+    app.querySelector('.alert.success')?.remove();
+  }, undo ? 8000 : 4000);
 }
 
 function clearNotice() {
   state.notice = '';
+  state.undo = null;
   if (noticeTimeoutId) clearTimeout(noticeTimeoutId);
-  render();
+  app.querySelector('.alert.success')?.remove();
 }
 
 function setError(message) {
@@ -283,8 +294,9 @@ function inventoryView() {
             ${exp.badge ? `<span class="badge ${exp.badgeClass}">${esc(exp.badge)}</span>` : ''}
           </div>
           <div class="item-meta">
-            <small><strong>${esc(item.quantity)} ${esc(item.unit)}</strong> · Local: <em>${esc(storageLabel(item.storage_location))}</em></small>
+            <small><strong>${esc(formatQuantity(item.quantity))} ${esc(item.unit)}</strong> · Local: <em>${esc(storageLabel(item.storage_location))}</em></small>
             <small class="${exp.isWarning || exp.isExpired ? '' : 'muted'}">${esc(exp.label)}</small>
+            ${Number(item.weekly_usage) > 0 ? `<small class="muted">uso ~${esc(formatQuantity(item.weekly_usage))} ${esc(item.unit)}/semana</small>` : ''}
           </div>
           <details class="item-details" ${isEditing ? 'open' : ''} data-id="${item.id}">
             <summary data-action="toggle-edit" data-id="${item.id}">${isEditing ? 'Ocultar detalhes' : 'Editar detalhes'}</summary>
@@ -318,6 +330,7 @@ function inventoryView() {
               <label>
                 Validade
                 <input name="expires_on" type="date" value="${esc(item.expires_on || '')}">
+                <span class="field-note">vazio = sem validade</span>
               </label>
               <div class="details-form-actions">
                 <button type="submit" class="primary" ${state.submitting ? 'disabled' : ''}>Salvar</button>
@@ -329,9 +342,10 @@ function inventoryView() {
         <div class="item-actions">
           <div class="quantity" role="group" aria-label="Ajustar quantidade de ${esc(item.name)}">
             <button type="button" class="quantity-button" data-action="adjust" data-id="${item.id}" data-delta="-1" aria-label="Diminuir 1 ${esc(item.unit)} de ${esc(item.name)}" ${Number(item.quantity) <= 0 || state.submitting ? 'disabled' : ''}>−</button>
-            <b>${esc(item.quantity)}</b>
+            <b>${esc(formatQuantity(item.quantity))}</b>
             <button type="button" class="quantity-button" data-action="adjust" data-id="${item.id}" data-delta="1" aria-label="Aumentar 1 ${esc(item.unit)} de ${esc(item.name)}" ${state.submitting ? 'disabled' : ''}>+</button>
           </div>
+          ${isLow || isExpired ? `<button type="button" class="icon-button" data-action="restock" data-id="${item.id}" aria-label="Adicionar ${esc(item.name)} à lista de compras" title="Adicionar à lista de compras" ${state.submitting ? 'disabled' : ''}>🛒</button>` : ''}
           <button type="button" class="icon-button danger" data-action="delete-inventory" data-id="${item.id}" aria-label="Excluir ${esc(item.name)} do estoque" title="Excluir item" ${state.submitting ? 'disabled' : ''}>×</button>
         </div>
       </article>`;
@@ -348,16 +362,13 @@ function shoppingView() {
       </div>`;
   }
 
-  const pendingItems = state.shopping.filter((item) => !item.checked);
-  const completedItems = state.shopping.filter((item) => item.checked);
-
   return state.shopping.map((item) => `
     <article class="item ${item.checked ? 'checked' : ''}" data-item-id="${item.id}">
       <label class="shopping-label">
         <input type="checkbox" data-action="toggle-shopping" data-id="${item.id}" ${item.checked ? 'checked' : ''} aria-label="Marcar ${esc(item.name)} como comprado">
         <div class="shopping-text">
           <strong>${esc(item.name)}</strong>
-          <small>${esc(item.quantity)} ${esc(item.unit)}</small>
+          <small>${esc(formatQuantity(item.quantity))} ${esc(item.unit)}</small>
         </div>
       </label>
       <div class="item-actions">
@@ -367,13 +378,52 @@ function shoppingView() {
   `).join('');
 }
 
+// O render recria o DOM inteiro; sem isso o foco e o cursor se perdem sempre
+// que uma atualização chega enquanto o usuário digita ou usa o teclado.
+const FOCUS_KEYS = ['action', 'id', 'tab', 'filter', 'delta', 'text'];
+
+function focusSelector(element) {
+  if (element.id) return `#${element.id}`;
+  const form = element.closest('form[data-form][data-id]');
+  if (form && element.name) {
+    return `form[data-form="${form.dataset.form}"][data-id="${form.dataset.id}"] [name="${element.name}"]`;
+  }
+  if (!element.dataset?.action) return null;
+  const parts = FOCUS_KEYS
+    .filter((key) => element.dataset[key] !== undefined)
+    .map((key) => (element.dataset[key].includes('"') ? null : `[data-${key}="${element.dataset[key]}"]`));
+  return parts.includes(null) ? null : parts.join('');
+}
+
+function captureFocus() {
+  const element = document.activeElement;
+  if (!element || !app.contains(element)) return null;
+  const selector = focusSelector(element);
+  if (!selector) return null;
+  try {
+    return { selector, start: element.selectionStart, end: element.selectionEnd };
+  } catch {
+    return { selector }; // campos como number/date não expõem seleção
+  }
+}
+
+function restoreFocus(snapshot) {
+  const element = snapshot && app.querySelector(snapshot.selector);
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  if (snapshot.start === null || snapshot.start === undefined) return;
+  try {
+    element.setSelectionRange(snapshot.start, snapshot.end);
+  } catch { /* seleção indisponível para este campo */ }
+}
+
 function render() {
+  const focused = captureFocus();
   const pendingCount = state.shopping.filter((item) => !item.checked).length;
   const hasCompletedShopping = state.shopping.some((item) => item.checked);
   const alertsCount = inventoryCountByStorage('alertas');
 
   app.innerHTML = `
-    <div id="live-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     <div class="shell">
       <header>
         <div>
@@ -381,7 +431,12 @@ function render() {
           <h1>Sous</h1>
           <p class="subtitle">Seu estoque e sua lista de compras sincronizados, sem complicação.</p>
         </div>
-        <span class="status"><i></i> offline-first pronto</span>
+        <div class="header-tools">
+          <span class="status"><i></i> dados locais, funciona offline</span>
+          <button type="button" class="secondary" data-action="export-backup">Exportar</button>
+          <button type="button" class="secondary" data-action="import-backup">Importar</button>
+          <input id="backup-file" type="file" accept="application/json,.json" hidden>
+        </div>
       </header>
 
       ${state.error ? `
@@ -403,7 +458,10 @@ function render() {
             <span aria-hidden="true">✓</span>
             <span>${esc(state.notice)}</span>
           </div>
-          <button type="button" class="close-alert" data-action="clear-notice" aria-label="Fechar aviso">×</button>
+          <div class="alert-actions">
+            ${state.undo ? '<button type="button" class="secondary" data-action="undo">Desfazer</button>' : ''}
+            <button type="button" class="close-alert" data-action="clear-notice" aria-label="Fechar aviso">×</button>
+          </div>
         </div>
       ` : ''}
 
@@ -563,6 +621,9 @@ function render() {
             </div>
             <div class="heading-actions">
               ${hasCompletedShopping ? `
+                <button type="button" class="primary" data-action="checkout-shopping" ${state.submitting ? 'disabled' : ''}>
+                  Mover comprados para o estoque
+                </button>
                 <button type="button" class="secondary" data-action="clear-completed-shopping" ${state.submitting ? 'disabled' : ''}>
                   Limpar comprados
                 </button>
@@ -598,6 +659,8 @@ function render() {
         </section>
       `}
     </div>`;
+
+  restoreFocus(focused);
 }
 
 // Event Listeners
@@ -693,6 +756,41 @@ app.addEventListener('click', async (event) => {
       return;
     }
 
+    if (action === 'undo') {
+      const undo = state.undo;
+      if (!undo) return;
+      state.submitting = true;
+      button.disabled = true;
+      if (undo.kind === 'inventory') {
+        await api('/api/inventory/restore', { method: 'POST', body: JSON.stringify(undo.item) });
+      } else if (undo.kind === 'shopping') {
+        await api('/api/shopping/restore', { method: 'POST', body: JSON.stringify(undo.item) });
+      } else if (undo.kind === 'shopping-many') {
+        await Promise.all(undo.items.map((item) => api('/api/shopping/restore', { method: 'POST', body: JSON.stringify(item) })));
+      }
+      clearNotice();
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'export-backup') {
+      const backup = await api('/api/backup');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `sous-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice('Backup baixado. Guarde o arquivo para restaurar depois.');
+      return;
+    }
+
+    if (action === 'import-backup') {
+      document.querySelector('#backup-file')?.click();
+      return;
+    }
+
     if (action === 'reload') {
       await load();
       return;
@@ -730,6 +828,9 @@ app.addEventListener('click', async (event) => {
 
       state.submitting = false;
       await load(true);
+      if (delta < 0 && newQty <= Number(item.min_quantity)) {
+        announce(`${item.name} em estoque baixo.`);
+      }
       return;
     }
 
@@ -741,8 +842,8 @@ app.addEventListener('click', async (event) => {
       state.submitting = true;
       button.disabled = true;
 
-      await api(`/api/inventory/${id}`, { method: 'DELETE' });
-      setNotice(`"${itemName}" removido do estoque.`);
+      const result = await api(`/api/inventory/${id}`, { method: 'DELETE' });
+      setNotice(`"${itemName}" removido do estoque.`, 'success', result.item ? { kind: 'inventory', item: result.item } : null);
       state.submitting = false;
       await load(true);
       return;
@@ -756,8 +857,43 @@ app.addEventListener('click', async (event) => {
       state.submitting = true;
       button.disabled = true;
 
-      await api(`/api/shopping/${id}`, { method: 'DELETE' });
-      setNotice(`"${itemName}" removido da lista.`);
+      const result = await api(`/api/shopping/${id}`, { method: 'DELETE' });
+      setNotice(`"${itemName}" removido da lista.`, 'success', result.item ? { kind: 'shopping', item: result.item } : null);
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'restock') {
+      const id = Number(button.dataset.id);
+      const item = state.inventory.find((entry) => entry.id === id);
+      if (!item) return;
+
+      const quantity = Number(item.restock_quantity) > 0
+        ? Number(item.restock_quantity)
+        : Math.max(Math.round((Number(item.min_quantity) - Number(item.quantity)) * 100) / 100, 1);
+
+      state.submitting = true;
+      button.disabled = true;
+
+      await api('/api/shopping', {
+        method: 'POST',
+        body: JSON.stringify({ name: item.name, quantity, unit: item.unit }),
+      });
+      setNotice(`"${item.name}" adicionado à lista de compras.`);
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'checkout-shopping') {
+      state.submitting = true;
+      render();
+
+      const result = await api('/api/shopping/checkout', { method: 'POST', body: '{}' });
+      setNotice(result.moved === 1
+        ? `"${result.items[0].name}" foi para o estoque.`
+        : `${result.moved} itens foram para o estoque.`);
       state.submitting = false;
       await load(true);
       return;
@@ -770,8 +906,16 @@ app.addEventListener('click', async (event) => {
       state.submitting = true;
       render();
 
-      await Promise.all(completed.map((item) => api(`/api/shopping/${item.id}`, { method: 'DELETE' })));
-      setNotice(`${completed.length} ${completed.length === 1 ? 'item comprado removido' : 'itens comprados removidos'}.`);
+      const removed = [];
+      for (const item of completed) {
+        const result = await api(`/api/shopping/${item.id}`, { method: 'DELETE' });
+        if (result.item) removed.push(result.item);
+      }
+      setNotice(
+        `${completed.length} ${completed.length === 1 ? 'item comprado removido' : 'itens comprados removidos'}.`,
+        'success',
+        removed.length ? { kind: 'shopping-many', items: removed } : null,
+      );
       state.submitting = false;
       await load(true);
       return;
@@ -800,6 +944,22 @@ app.addEventListener('click', async (event) => {
 });
 
 app.addEventListener('change', async (event) => {
+  if (event.target.id === 'backup-file') {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!window.confirm('Isso substitui estoque, lista e histórico atuais. Continuar?')) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      const result = await api('/api/backup', { method: 'POST', body: JSON.stringify(payload) });
+      setNotice(`Importados ${result.imported.inventory} itens de estoque e ${result.imported.shopping} da lista.`);
+      await load(true);
+    } catch (error) {
+      setError(error instanceof SyntaxError ? 'Arquivo de backup inválido.' : error.message);
+    }
+    return;
+  }
+
   const input = event.target.closest('[data-action="toggle-shopping"]');
   if (!input) return;
 
@@ -849,17 +1009,18 @@ app.addEventListener('submit', async (event) => {
       const body = Object.fromEntries(formData);
       body.auto_expiry = form.elements.auto_expiry.checked;
 
-      await api('/api/inventory', {
+      const { item, merged } = await api('/api/inventory', {
         method: 'POST',
         body: JSON.stringify(body),
       });
 
-      const itemName = body.name || 'Item';
       form.reset();
       // Keep auto_expiry checked by default
       if (form.elements.auto_expiry) form.elements.auto_expiry.checked = true;
 
-      setNotice(`"${itemName}" adicionado ao estoque.`);
+      setNotice(merged
+        ? `Estoque de "${item.name}" atualizado para ${formatQuantity(item.quantity)} ${item.unit}.`
+        : `"${item.name}" adicionado ao estoque.`);
       state.error = '';
       state.submitting = false;
       await load(true);
@@ -870,15 +1031,16 @@ app.addEventListener('submit', async (event) => {
       const formData = new FormData(form);
       const body = Object.fromEntries(formData);
 
-      await api('/api/shopping', {
+      const { item, merged } = await api('/api/shopping', {
         method: 'POST',
         body: JSON.stringify(body),
       });
 
-      const itemName = body.name || 'Item';
       form.reset();
 
-      setNotice(`"${itemName}" adicionado à lista de compras.`);
+      setNotice(merged
+        ? `"${item.name}" atualizado para ${formatQuantity(item.quantity)} ${item.unit} na lista.`
+        : `"${item.name}" adicionado à lista de compras.`);
       state.error = '';
       state.submitting = false;
       await load(true);
@@ -911,3 +1073,7 @@ app.addEventListener('submit', async (event) => {
 // Initial startup
 render();
 load();
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => { /* cache opcional */ });
+}
