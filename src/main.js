@@ -57,8 +57,7 @@ function setNotice(message, type = 'success', undo = null) {
   state.undo = undo;
   announce(message);
   if (noticeTimeoutId) clearTimeout(noticeTimeoutId);
-  // Expirar o aviso remove só a faixa: um render completo aqui apagaria o que
-  // estiver sendo digitado em um formulário aberto.
+  render();
   noticeTimeoutId = setTimeout(() => {
     state.notice = '';
     state.undo = null;
@@ -460,7 +459,7 @@ function render() {
             <span>${esc(state.notice)}</span>
           </div>
           <div class="alert-actions">
-            ${state.undo ? '<button type="button" class="link-button" data-action="undo">Desfazer</button>' : ''}
+            ${state.undo ? '<button type="button" class="secondary" data-action="undo">Desfazer</button>' : ''}
             <button type="button" class="close-alert" data-action="clear-notice" aria-label="Fechar aviso">×</button>
           </div>
         </div>
@@ -759,9 +758,9 @@ app.addEventListener('click', async (event) => {
 
     if (action === 'undo') {
       const undo = state.undo;
-      clearNotice();
       if (!undo) return;
       state.submitting = true;
+      button.disabled = true;
       if (undo.kind === 'inventory') {
         await api('/api/inventory/restore', { method: 'POST', body: JSON.stringify(undo.item) });
       } else if (undo.kind === 'shopping') {
@@ -769,6 +768,7 @@ app.addEventListener('click', async (event) => {
       } else if (undo.kind === 'shopping-many') {
         await Promise.all(undo.items.map((item) => api('/api/shopping/restore', { method: 'POST', body: JSON.stringify(item) })));
       }
+      clearNotice();
       state.submitting = false;
       await load(true);
       return;
