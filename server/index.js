@@ -49,8 +49,9 @@ function inferStorageLocation(name) {
   const value = normalizedText(name);
   if (/(?:congelad|sorvete|gelo|polpa)/.test(value)) return 'freezer';
   if (/\b(?:contra[- ]?file|carne|frango|peixe|presunto|linguica|picanha|bife|alcatra|patinho|acem)\b/.test(value)) return 'geladeira';
+  // Caixas de leite e de creme de leite ficam na despensa até serem abertas.
   if (/\b(?:leite)\b/.test(value)) return /\b(?:abert[oa]?|abri[ur]?)\b/.test(value) ? 'geladeira' : 'despensa';
-  if (/\b(?:queijo|iogurte|manteiga|requeijao|creme de leite|ovo|tofu)\b/.test(value)) return 'geladeira';
+  if (/\b(?:queijo|iogurte|manteiga|requeijao|ovo|tofu)\b/.test(value)) return 'geladeira';
   if (/\b(?:banana|maca|laranja|limao|abacate|manga|mamao|pera)\b/.test(value)) return 'fruteira';
   return 'despensa';
 }
@@ -145,7 +146,13 @@ function addInventory(db, body) {
   const existing = findMergeable(db.prepare('SELECT * FROM inventory').all(), name, unit);
   if (existing) {
     const total = roundQuantity(Number(existing.quantity) + convertQuantity(quantity, unit, existing.unit));
-    const meta = inventoryMeta({ ...body, name: existing.name, storage_location: body?.storage_location || undefined }, existing);
+    // Repor um item só altera validade e local quando o pedido traz valores.
+    const meta = inventoryMeta({
+      ...body,
+      name: existing.name,
+      storage_location: body?.storage_location || undefined,
+      expires_on: String(body?.expires_on ?? '').trim() || undefined,
+    }, existing);
     const minQuantity = body?.min_quantity === undefined ? existing.min_quantity : quantityOf(body.min_quantity, existing.min_quantity);
     db.prepare('UPDATE inventory SET quantity = ?, min_quantity = ?, storage_location = ?, expires_on = ?, expiry_estimated = ?, updated_at = ? WHERE id = ?')
       .run(total, minQuantity, meta.storage_location, meta.expires_on, meta.expiry_estimated, timestamp, existing.id);

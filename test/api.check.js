@@ -151,6 +151,18 @@ test('itens repetidos somam quantidade em vez de duplicar a linha', async () => 
   assert.equal(rows.length, 1);
 });
 
+test('repor um item pelo formulário não apaga a validade guardada', async () => {
+  const created = (await request('POST', '/api/inventory', { name: 'manteiga', quantity: 1 })).json().item;
+  assert.equal(created.expiry_estimated, 1);
+
+  // O formulário envia os campos vazios que o usuário não preencheu.
+  const merged = (await request('POST', '/api/inventory', { name: 'manteiga', quantity: 2, unit: 'un', storage_location: '', expires_on: '', auto_expiry: true })).json().item;
+  assert.equal(merged.quantity, 3);
+  assert.equal(merged.expires_on, created.expires_on);
+  assert.equal(merged.expiry_estimated, 1);
+  assert.equal(merged.storage_location, created.storage_location);
+});
+
 test('unidades de grandezas diferentes continuam em linhas separadas', async () => {
   await request('POST', '/api/inventory', { name: 'cebola', quantity: 3, unit: 'un' });
   const other = await request('POST', '/api/inventory', { name: 'cebola', quantity: 1, unit: 'kg' });
