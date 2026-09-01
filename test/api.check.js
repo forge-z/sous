@@ -122,7 +122,7 @@ test('POST /api/commands normaliza unidades por extenso', async () => {
   const item = (await request('GET', '/api/inventory')).json().items.find((entry) => entry.name === 'leite condensado');
   assert.equal(item.unit, 'l');
 
-  const dozen = await request('POST', '/api/commands', { text: 'comprei dúzia de ovos' });
+  const dozen = await request('POST', '/api/commands', { text: 'comprei dúzia de bananas' });
   assert.equal(dozen.statusCode, 200);
   assert.equal(dozen.json().item.quantity, 12);
   assert.equal(dozen.json().item.unit, 'un');
@@ -132,4 +132,124 @@ test('POST /api/commands rejeita texto não reconhecido com 422', async () => {
   const response = await request('POST', '/api/commands', { text: 'olá sous' });
   assert.equal(response.statusCode, 422);
   assert.match(response.json().error, /Não entendi/);
+});
+
+test('itens repetidos somam quantidade em vez de duplicar a linha', async () => {
+  const created = await request('POST', '/api/inventory', { name: 'lentilha', quantity: 2, unit: 'kg' });
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.json().merged, false);
+
+  const merged = await request('POST', '/api/inventory', { name: 'Lentilha', quantity: 500, unit: 'g' });
+  assert.equal(merged.statusCode, 200);
+  assert.equal(merged.json().merged, true);
+  assert.equal(merged.json().item.id, created.json().item.id);
+  assert.equal(merged.json().item.quantity, 2.5);
+  assert.equal(merged.json().item.unit, 'kg');
+  assert.equal(merged.json().item.name, 'lentilha');
+
+  const rows = (await request('GET', '/api/inventory')).json().items.filter((item) => /lentilha/i.test(item.name));
+  assert.equal(rows.length, 1);
+});
+
+test('unidades de grandezas diferentes continuam em linhas separadas', async () => {
+  await request('POST', '/api/inventory', { name: 'cebola', quantity: 3, unit: 'un' });
+  const other = await request('POST', '/api/inventory', { name: 'cebola', quantity: 1, unit: 'kg' });
+  assert.equal(other.statusCode, 201);
+  assert.equal((await request('GET', '/api/inventory')).json().items.filter((item) => item.name === 'cebola').length, 2);
+});
+
+test('a lista de compras soma pendentes e mantém comprados separados', async () => {
+  const created = (await request('POST', '/api/shopping', { name: 'azeite', quantity: 1 })).json().item;
+  const merged = await request('POST', '/api/shopping', { name: 'Azeite', quantity: 2 });
+  assert.equal(merged.json().item.id, created.id);
+  assert.equal(merged.json().item.quantity, 3);
+
+  await request('PATCH', `/api/shopping/${created.id}`, { checked: true });
+  const again = await request('POST', '/api/shopping', { name: 'azeite', quantity: 1 });
+  assert.equal(again.statusCode, 201);
+  assert.notEqual(again.json().item.id, created.id);
+
+  for (const item of (await request('GET', '/api/shopping')).json().items) {
+    await request('DELETE', `/api/shopping/${item.id}`);
+  }
+});
+
+test('POST /api/shopping/checkout move os comprados para o estoque', async () => {
+  assert.equal((await request('POST', '/api/shopping/checkout')).statusCode, 422);
+
+  const bought = (await request('POST', '/api/shopping', { name: 'grão de bico', quantity: 2, unit: 'kg' })).json().item;
+  const pending = (await request('POST', '/api/shopping', { name: 'guardanapo' })).json().item;
+  await request('PATCH', `/api/shopping/${bought.id}`, { checked: true });
+
+  const checkout = await request('POST', '/api/shopping/checkout');
+  assert.equal(checkout.statusCode, 200);
+  assert.equal(checkout.json().moved, 1);
+  assert.equal(checkout.json().items[0].name, 'grão de bico');
+
+  const list = (await request('GET', '/api/shopping')).json().items;
+  assert.deepEqual(list.map((item) => item.id), [pending.id]);
+  const stocked = (await request('GET', '/api/inventory')).json().items.find((item) => item.name === 'grão de bico');
+  assert.equal(stocked.quantity, 2);
+  assert.equal(stocked.unit, 'kg');
+
+  await request('DELETE', `/api/shopping/${pending.id}`);
+});
+
+test('atualizar a quantidade não renova a validade estimada', async () => {
+  const created = (await request('POST', '/api/inventory', { name: 'iogurte natural', quantity: 1 })).json().item;
+  assert.equal(created.expiry_estimated, 1);
+
+  await request('PATCH', `/api/inventory/${created.id}`, { expires_on: '2020-01-05' });
+  const explicit = (await request('PATCH', `/api/inventory/${created.id}`, { quantity: 4 })).json().item;
+  assert.equal(explicit.expires_on, '2020-01-05');
+  assert.equal(explicit.expiry_estimated, 0);
+
+  const renamed = (await request('PATCH', `/api/inventory/${created.id}`, { name: 'iogurte grego' })).json().item;
+  assert.equal(renamed.expires_on, '2020-01-05');
+
+  // Reenviar a mesma data preserva o rótulo de estimativa do item.
+  const auto = (await request('POST', '/api/inventory', { name: 'requeijão', quantity: 1 })).json().item;
+  const resent = (await request('PATCH', `/api/inventory/${auto.id}`, { name: 'requeijão light', expires_on: auto.expires_on })).json().item;
+  assert.equal(resent.expiry_estimated, 1);
+  assert.equal(resent.expires_on, auto.expires_on);
+});
+
+test('PATCH com expires_on vazio limpa a validade', async () => {
+  const created = (await request('POST', '/api/inventory', { name: 'fermento', quantity: 1 })).json().item;
+  await request('PATCH', `/api/inventory/${created.id}`, { expires_on: '2030-01-05' });
+  const cleared = (await request('PATCH', `/api/inventory/${created.id}`, { expires_on: '' })).json().item;
+  assert.equal(cleared.expires_on, null);
+  assert.equal(cleared.expiry_estimated, 0);
+});
+
+test('POST /api/inventory respeita auto_expiry desligado', async () => {
+  const item = (await request('POST', '/api/inventory', { name: 'peito de frango', quantity: 1, auto_expiry: false })).json().item;
+  assert.equal(item.expires_on, null);
+  assert.equal(item.storage_location, 'geladeira');
+});
+
+test('POST /api/cook prioriza o que está perto do vencimento', async () => {
+  for (const item of (await request('GET', '/api/inventory')).json().items) {
+    await request('DELETE', `/api/inventory/${item.id}`);
+  }
+
+  await request('POST', '/api/inventory', { name: 'farinha', quantity: 1, auto_expiry: false });
+  const relaxed = await request('POST', '/api/cook');
+  assert.deepEqual(relaxed.json().priority, []);
+  assert.match(relaxed.json().suggestion, /farinha/);
+
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 1);
+  await request('POST', '/api/inventory', { name: 'espinafre', quantity: 1, expires_on: soon.toISOString().slice(0, 10) });
+  const urgent = await request('POST', '/api/cook');
+  assert.deepEqual(urgent.json().priority, ['espinafre']);
+  assert.match(urgent.json().suggestion, /Comece por espinafre/);
+});
+
+test('POST /api/cook orienta o usuário quando o estoque está vazio', async () => {
+  for (const item of (await request('GET', '/api/inventory')).json().items) {
+    await request('DELETE', `/api/inventory/${item.id}`);
+  }
+  const response = await request('POST', '/api/cook');
+  assert.match(response.json().suggestion, /Adicione alguns itens/);
 });
