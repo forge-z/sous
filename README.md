@@ -4,6 +4,20 @@ Versão leve do Sous para uma cozinha doméstica: Vite, JavaScript, Fastify e
 SQLite em um único container. A interface é PT-BR por padrão e os dados ficam
 em um volume local, sem serviço externo ou chave de IA.
 
+## Como o estoque se comporta
+
+- Registrar um item que já existe soma à quantidade guardada em vez de criar
+  uma linha repetida. `500 g` entram em um item medido em `kg`; `un` só soma
+  com `un`, então "3 cebolas" e "1 kg de cebola" continuam separados.
+- A validade estimada é calculada uma única vez, quando o item entra no
+  estoque. Ajustar a quantidade ou renomear o item não adia essa data — só
+  informar outra data no formulário muda a validade. Salvar o campo de
+  validade vazio remove a data.
+- Na lista de compras, o que já está marcado como comprado nunca recebe soma:
+  pedir o mesmo item de novo cria uma linha pendente.
+- "Mover comprados para o estoque" (`POST /api/shopping/checkout`) transfere
+  todos os itens marcados para o estoque e os remove da lista.
+
 ## Execução local com Docker
 
 Requer Docker com Compose. Para iniciar uma instância local:
