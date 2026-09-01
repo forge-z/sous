@@ -17,6 +17,17 @@ em um volume local, sem serviço externo ou chave de IA.
   pedir o mesmo item de novo cria uma linha pendente.
 - "Mover comprados para o estoque" (`POST /api/shopping/checkout`) transfere
   todos os itens marcados para o estoque e os remove da lista.
+- Diminuir a quantidade registra consumo. Depois de algumas baixas o item
+  mostra o uso semanal estimado e o atalho de reposição usa esse valor.
+- Excluir um item mostra **Desfazer** por alguns segundos.
+- **Exportar** / **Importar** no cabeçalho grava e restaura estoque, lista e
+  histórico em JSON (`GET`/`POST /api/backup`). A importação substitui os
+  dados atuais. O arquivo `sous.db` no volume continua válido como cópia
+  bruta do banco.
+
+Em produção o app registra um service worker e pode ser instalado no celular
+(manifest em `/manifest.webmanifest`). A API não é cacheada: só a interface
+fica disponível offline.
 
 ## Execução local com Docker
 
@@ -34,9 +45,9 @@ no `.env` e recrie o container:
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
-O banco SQLite é persistido no volume `sous_data`. Para fazer backup,
-pare a aplicação e copie o arquivo `sous.db` do volume; não remova o volume
-durante atualizações.
+O banco SQLite é persistido no volume `sous_data`. Prefira **Exportar** na
+interface para um backup em JSON; copiar `sous.db` do volume ainda funciona
+se a aplicação estiver parada. Não remova o volume durante atualizações.
 
 ## Deploy no Coolify
 
@@ -69,5 +80,5 @@ npm start
 npm run check
 ```
 
-O endpoint de saúde é `GET /healthz`. O banco fica no volume
-`sous_data`; não há Postgres nem serviço externo.
+`check` roda o lint, os testes e o build. O endpoint de saúde é `GET /healthz`.
+O banco fica no volume `sous_data`; não há Postgres nem serviço externo.

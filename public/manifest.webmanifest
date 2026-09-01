@@ -1,0 +1,19 @@
+{
+  "name": "Sous",
+  "short_name": "Sous",
+  "description": "Estoque e lista de compras para a cozinha de casa.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f2eb",
+  "theme_color": "#244936",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

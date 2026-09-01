@@ -32,6 +32,13 @@ export function openDatabase(dataDir) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      delta REAL NOT NULL,
+      unit TEXT NOT NULL DEFAULT 'un' CHECK (unit IN (${CANONICAL_UNITS})),
+      created_at TEXT NOT NULL
+    );
   `);
 
   const columns = new Set(db.prepare('PRAGMA table_info(inventory)').all().map((column) => column.name));

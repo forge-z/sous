@@ -77,9 +77,12 @@ test('PATCH/DELETE /api/inventory com id inexistente retorna 404', async () => {
   assert.equal((await request('DELETE', '/api/inventory/99999')).statusCode, 404);
 });
 
-test('DELETE /api/inventory remove o item', async () => {
+test('DELETE /api/inventory remove o item e devolve o registro para desfazer', async () => {
   const created = (await request('POST', '/api/inventory', { name: 'temporário' })).json().item;
-  assert.deepEqual((await request('DELETE', `/api/inventory/${created.id}`)).json(), { ok: true });
+  const deleted = await request('DELETE', `/api/inventory/${created.id}`);
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().ok, true);
+  assert.equal(deleted.json().item.name, 'temporário');
   assert.equal((await request('DELETE', `/api/inventory/${created.id}`)).statusCode, 404);
 });
 
@@ -264,4 +267,63 @@ test('POST /api/cook orienta o usuário quando o estoque está vazio', async () 
   }
   const response = await request('POST', '/api/cook');
   assert.match(response.json().suggestion, /Adicione alguns itens/);
+});
+
+test('schema rejeita tipos inválidos sem vazar erro interno', async () => {
+  const response = await request('POST', '/api/inventory', { name: 'x', quantity: { n: 1 } });
+  assert.equal(response.statusCode, 400);
+  assert.match(response.json().error, /Pedido inválido/);
+});
+
+test('baixa de quantidade registra consumo e sugere reposição', async () => {
+  const created = (await request('POST', '/api/inventory', { name: 'açúcar', quantity: 8, unit: 'kg', min_quantity: 1 })).json().item;
+  assert.equal(created.weekly_usage, 0);
+
+  await request('PATCH', `/api/inventory/${created.id}`, { quantity: 4 });
+  const after = (await request('GET', '/api/inventory')).json().items.find((item) => item.id === created.id);
+  assert.equal(after.quantity, 4);
+  assert.equal(after.weekly_usage, 1);
+  assert.equal(after.restock_quantity, 1);
+});
+
+test('DELETE + restore devolve o item com a validade original', async () => {
+  const created = (await request('POST', '/api/inventory', { name: 'iogurte desfazer', quantity: 2, expires_on: '2031-04-01' })).json().item;
+  const deleted = (await request('DELETE', `/api/inventory/${created.id}`)).json().item;
+  const restored = await request('POST', '/api/inventory/restore', deleted);
+  assert.equal(restored.statusCode, 201);
+  assert.equal(restored.json().item.name, 'iogurte desfazer');
+  assert.equal(restored.json().item.expires_on, '2031-04-01');
+  assert.equal(restored.json().item.expiry_estimated, 0);
+});
+
+test('GET/POST /api/backup exporta e substitui os dados', async () => {
+  for (const item of (await request('GET', '/api/inventory')).json().items) {
+    await request('DELETE', `/api/inventory/${item.id}`);
+  }
+  for (const item of (await request('GET', '/api/shopping')).json().items) {
+    await request('DELETE', `/api/shopping/${item.id}`);
+  }
+
+  await request('POST', '/api/inventory', { name: 'quinoa', quantity: 1, unit: 'kg', auto_expiry: false });
+  await request('POST', '/api/shopping', { name: 'limão', quantity: 4 });
+  const snapshot = (await request('GET', '/api/backup')).json();
+  assert.equal(snapshot.version, 1);
+  assert.equal(snapshot.inventory.length, 1);
+  assert.equal(snapshot.shopping.length, 1);
+  assert.equal(snapshot.inventory[0].name, 'quinoa');
+
+  const imported = await request('POST', '/api/backup', {
+    inventory: [{ name: 'aveia', quantity: 2, unit: 'kg', min_quantity: 0, storage_location: 'despensa', expires_on: null, expiry_estimated: 0 }],
+    shopping: [{ name: 'mel', quantity: 1, unit: 'un', checked: false }],
+    movements: [{ name: 'aveia', delta: -1, unit: 'kg', created_at: new Date().toISOString() }],
+  });
+  assert.equal(imported.statusCode, 200);
+  assert.deepEqual(imported.json().imported, { inventory: 1, shopping: 1, movements: 1 });
+
+  const stock = (await request('GET', '/api/inventory')).json().items;
+  assert.equal(stock.length, 1);
+  assert.equal(stock[0].name, 'aveia');
+  assert.equal(stock[0].weekly_usage, 0.25);
+  assert.equal((await request('GET', '/api/shopping')).json().items[0].name, 'mel');
+  assert.equal((await request('POST', '/api/backup', { inventory: 'não' })).statusCode, 400);
 });

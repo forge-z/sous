@@ -24,6 +24,7 @@ const state = {
   searchQuery: '',
   cookSuggestion: '',
   cookLoading: false,
+  undo: null,
 };
 
 const app = document.querySelector('#app');
@@ -50,21 +51,24 @@ function announce(message) {
   if (el) el.textContent = message;
 }
 
-function setNotice(message, type = 'success') {
+function setNotice(message, type = 'success', undo = null) {
   state.notice = message;
   state.noticeType = type;
+  state.undo = undo;
   announce(message);
   if (noticeTimeoutId) clearTimeout(noticeTimeoutId);
   // Expirar o aviso remove só a faixa: um render completo aqui apagaria o que
   // estiver sendo digitado em um formulário aberto.
   noticeTimeoutId = setTimeout(() => {
     state.notice = '';
+    state.undo = null;
     app.querySelector('.alert.success')?.remove();
-  }, 4000);
+  }, undo ? 8000 : 4000);
 }
 
 function clearNotice() {
   state.notice = '';
+  state.undo = null;
   if (noticeTimeoutId) clearTimeout(noticeTimeoutId);
   app.querySelector('.alert.success')?.remove();
 }
@@ -293,6 +297,7 @@ function inventoryView() {
           <div class="item-meta">
             <small><strong>${esc(formatQuantity(item.quantity))} ${esc(item.unit)}</strong> · Local: <em>${esc(storageLabel(item.storage_location))}</em></small>
             <small class="${exp.isWarning || exp.isExpired ? '' : 'muted'}">${esc(exp.label)}</small>
+            ${Number(item.weekly_usage) > 0 ? `<small class="muted">uso ~${esc(formatQuantity(item.weekly_usage))} ${esc(item.unit)}/semana</small>` : ''}
           </div>
           <details class="item-details" ${isEditing ? 'open' : ''} data-id="${item.id}">
             <summary data-action="toggle-edit" data-id="${item.id}">${isEditing ? 'Ocultar detalhes' : 'Editar detalhes'}</summary>
@@ -427,7 +432,12 @@ function render() {
           <h1>Sous</h1>
           <p class="subtitle">Seu estoque e sua lista de compras sincronizados, sem complicação.</p>
         </div>
-        <span class="status"><i></i> dados locais, sem nuvem</span>
+        <div class="header-tools">
+          <span class="status"><i></i> dados locais, funciona offline</span>
+          <button type="button" class="secondary" data-action="export-backup">Exportar</button>
+          <button type="button" class="secondary" data-action="import-backup">Importar</button>
+          <input id="backup-file" type="file" accept="application/json,.json" hidden>
+        </div>
       </header>
 
       ${state.error ? `
@@ -449,7 +459,10 @@ function render() {
             <span aria-hidden="true">✓</span>
             <span>${esc(state.notice)}</span>
           </div>
-          <button type="button" class="close-alert" data-action="clear-notice" aria-label="Fechar aviso">×</button>
+          <div class="alert-actions">
+            ${state.undo ? '<button type="button" class="link-button" data-action="undo">Desfazer</button>' : ''}
+            <button type="button" class="close-alert" data-action="clear-notice" aria-label="Fechar aviso">×</button>
+          </div>
         </div>
       ` : ''}
 
@@ -744,6 +757,40 @@ app.addEventListener('click', async (event) => {
       return;
     }
 
+    if (action === 'undo') {
+      const undo = state.undo;
+      clearNotice();
+      if (!undo) return;
+      state.submitting = true;
+      if (undo.kind === 'inventory') {
+        await api('/api/inventory/restore', { method: 'POST', body: JSON.stringify(undo.item) });
+      } else if (undo.kind === 'shopping') {
+        await api('/api/shopping/restore', { method: 'POST', body: JSON.stringify(undo.item) });
+      } else if (undo.kind === 'shopping-many') {
+        await Promise.all(undo.items.map((item) => api('/api/shopping/restore', { method: 'POST', body: JSON.stringify(item) })));
+      }
+      state.submitting = false;
+      await load(true);
+      return;
+    }
+
+    if (action === 'export-backup') {
+      const backup = await api('/api/backup');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `sous-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice('Backup baixado. Guarde o arquivo para restaurar depois.');
+      return;
+    }
+
+    if (action === 'import-backup') {
+      document.querySelector('#backup-file')?.click();
+      return;
+    }
+
     if (action === 'reload') {
       await load();
       return;
@@ -781,6 +828,9 @@ app.addEventListener('click', async (event) => {
 
       state.submitting = false;
       await load(true);
+      if (delta < 0 && newQty <= Number(item.min_quantity)) {
+        announce(`${item.name} em estoque baixo.`);
+      }
       return;
     }
 
@@ -792,8 +842,8 @@ app.addEventListener('click', async (event) => {
       state.submitting = true;
       button.disabled = true;
 
-      await api(`/api/inventory/${id}`, { method: 'DELETE' });
-      setNotice(`"${itemName}" removido do estoque.`);
+      const result = await api(`/api/inventory/${id}`, { method: 'DELETE' });
+      setNotice(`"${itemName}" removido do estoque.`, 'success', result.item ? { kind: 'inventory', item: result.item } : null);
       state.submitting = false;
       await load(true);
       return;
@@ -807,8 +857,8 @@ app.addEventListener('click', async (event) => {
       state.submitting = true;
       button.disabled = true;
 
-      await api(`/api/shopping/${id}`, { method: 'DELETE' });
-      setNotice(`"${itemName}" removido da lista.`);
+      const result = await api(`/api/shopping/${id}`, { method: 'DELETE' });
+      setNotice(`"${itemName}" removido da lista.`, 'success', result.item ? { kind: 'shopping', item: result.item } : null);
       state.submitting = false;
       await load(true);
       return;
@@ -819,8 +869,9 @@ app.addEventListener('click', async (event) => {
       const item = state.inventory.find((entry) => entry.id === id);
       if (!item) return;
 
-      const missing = Number(item.min_quantity) - Number(item.quantity);
-      const quantity = Math.max(Math.round(missing * 100) / 100, 1);
+      const quantity = Number(item.restock_quantity) > 0
+        ? Number(item.restock_quantity)
+        : Math.max(Math.round((Number(item.min_quantity) - Number(item.quantity)) * 100) / 100, 1);
 
       state.submitting = true;
       button.disabled = true;
@@ -855,8 +906,16 @@ app.addEventListener('click', async (event) => {
       state.submitting = true;
       render();
 
-      await Promise.all(completed.map((item) => api(`/api/shopping/${item.id}`, { method: 'DELETE' })));
-      setNotice(`${completed.length} ${completed.length === 1 ? 'item comprado removido' : 'itens comprados removidos'}.`);
+      const removed = [];
+      for (const item of completed) {
+        const result = await api(`/api/shopping/${item.id}`, { method: 'DELETE' });
+        if (result.item) removed.push(result.item);
+      }
+      setNotice(
+        `${completed.length} ${completed.length === 1 ? 'item comprado removido' : 'itens comprados removidos'}.`,
+        'success',
+        removed.length ? { kind: 'shopping-many', items: removed } : null,
+      );
       state.submitting = false;
       await load(true);
       return;
@@ -885,6 +944,22 @@ app.addEventListener('click', async (event) => {
 });
 
 app.addEventListener('change', async (event) => {
+  if (event.target.id === 'backup-file') {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!window.confirm('Isso substitui estoque, lista e histórico atuais. Continuar?')) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      const result = await api('/api/backup', { method: 'POST', body: JSON.stringify(payload) });
+      setNotice(`Importados ${result.imported.inventory} itens de estoque e ${result.imported.shopping} da lista.`);
+      await load(true);
+    } catch (error) {
+      setError(error instanceof SyntaxError ? 'Arquivo de backup inválido.' : error.message);
+    }
+    return;
+  }
+
   const input = event.target.closest('[data-action="toggle-shopping"]');
   if (!input) return;
 
@@ -998,3 +1073,7 @@ app.addEventListener('submit', async (event) => {
 // Initial startup
 render();
 load();
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => { /* cache opcional */ });
+}

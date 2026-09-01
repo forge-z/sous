@@ -1,5 +1,4 @@
 const NUMBER = '(\\d+(?:[.,]\\d+)?)';
-const UNIT = '(kg|quilo(?:s)?|g|grama(?:s)?|l|litro(?:s)?|ml|mililitro(?:s)?|un(?:idades?)?|unid(?:ade)?s?)?';
 
 const UNIT_ALIASES = new Map([
   ['kg', 'kg'], ['quilo', 'kg'], ['quilos', 'kg'],
